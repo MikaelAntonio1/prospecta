@@ -1,0 +1,570 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Prospecta</title>
+  <link rel="icon" type="image/svg+xml" href="img/hostquest-simbolo.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script>
+    // aplica o tema salvo antes de desenhar a tela (evita piscar)
+    try {
+      var t = localStorage.getItem('tema');
+      if (t === 'claro') document.documentElement.dataset.theme = 'light';
+      if (t === 'escuro') document.documentElement.dataset.theme = 'dark';
+    } catch (e) {}
+  </script>
+</head>
+<body>
+
+  <!-- ===== LOGIN ===== -->
+  <section id="tela-login" class="login" hidden>
+    <form id="form-login" class="login-card">
+      <div class="marca grande">
+        <img class="marca-simbolo" src="img/hostquest-simbolo.svg" alt="">
+        <span><span class="nome-sistema">Prospecta</span><small class="por-hq">um sistema HostQuest</small></span>
+      </div>
+      <h1>Entrar</h1>
+      <p class="dica">Use o login e a senha que o administrador criou para você.</p>
+      <label>Login<input name="login" autocomplete="username" autocapitalize="none" required></label>
+      <label>Senha<input name="senha" type="password" autocomplete="current-password" required></label>
+      <p class="msg-erro" id="login-erro"></p>
+      <button class="btn primario largo">Entrar</button>
+    </form>
+  </section>
+
+  <!-- ===== APP ===== -->
+  <div id="tela-app" class="app" hidden>
+    <header class="topo">
+      <div class="marca" title="HostQuest"><img class="marca-simbolo" src="img/hostquest-simbolo.svg" alt="HostQuest"><span class="nome-sistema">Prospecta</span></div>
+      <nav class="abas">
+        <a href="#prospeccoes" data-view="prospeccoes"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg>Prospecções</a>
+        <a href="#painel" data-view="painel"><svg viewBox="0 0 24 24"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>Painel</a>
+        <a href="#nichos" data-view="nichos"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg>Nichos</a>
+        <a href="#observacoes" data-view="observacoes"><svg viewBox="0 0 24 24"><path d="M5 4h14v16l-4-3H5z"/><path d="M8.5 9h7M8.5 12.5h5"/></svg>Observações</a>
+        <a href="#ganhos" data-view="ganhos" class="so-func"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2.5"/><path d="M3 10h18M16 14.5h2"/></svg>Meus ganhos</a>
+        <a href="#equipe" data-view="equipe" class="so-gestao"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.3-5.5 6.5-5.5s5.7 1.9 6.5 5.5M16 4.8a3.5 3.5 0 0 1 0 6.4M18.5 14.8c1.6.8 2.6 2.5 3 5.2"/></svg>Equipe</a>
+        <a href="#financeiro" data-view="financeiro" class="so-gestao"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M14.8 9.2c-.5-.9-1.6-1.4-2.8-1.4-1.6 0-2.8.8-2.8 2.1 0 3 5.8 1.5 5.8 4.3 0 1.3-1.3 2.1-3 2.1-1.3 0-2.5-.6-3-1.6M12 6v1.8M12 16.3V18"/></svg>Financeiro</a>
+        <a href="#perfil" data-view="perfil" class="so-mobile"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/></svg>Perfil</a>
+      </nav>
+      <a href="#perfil" class="eu" id="eu" title="Perfil e configurações"></a>
+    </header>
+
+    <main>
+      <!-- Prospecções -->
+      <section class="view" id="view-prospeccoes">
+        <div class="cab">
+          <div>
+            <h2>Prospecções</h2>
+            <p class="dica" id="contagem"></p>
+          </div>
+          <button class="btn primario" id="btn-nova">+ Nova prospecção</button>
+        </div>
+        <div class="filtro-periodo" id="fp-prosp"></div>
+        <div class="filtros">
+          <input type="search" id="f-busca" placeholder="Buscar empresa, telefone, cidade ou nicho…">
+          <select id="f-status">
+            <option value="">Todos os status</option>
+            <option value="aceitou">Aceitou</option>
+            <option value="pensando">Pensando</option>
+            <option value="recusou">Recusou</option>
+          </select>
+          <select id="f-nicho"></select>
+          <select id="f-usuario"></select>
+        </div>
+        <div class="lista" id="lista-prosp"></div>
+      </section>
+
+      <!-- Painel -->
+      <section class="view" id="view-painel">
+        <div class="cab">
+          <div>
+            <h2>Painel</h2>
+            <p class="dica" id="painel-rotulo"></p>
+          </div>
+        </div>
+        <div class="filtro-periodo" id="fp-painel"></div>
+        <div class="kpis" id="kpis"></div>
+        <div class="grade-painel">
+          <div class="cartao">
+            <div class="cartao-cab">
+              <h3>Quem mais prospectou <span class="selo-top">Top 5</span></h3>
+              <div class="legenda">
+                <span><i class="s-aceitou"></i>Aceitou</span>
+                <span><i class="s-pensando"></i>Pensando</span>
+                <span><i class="s-recusou"></i>Recusou</span>
+              </div>
+            </div>
+            <div id="ranking"></div>
+            <div class="rodape-cartao">
+              <span class="dica">Clique numa pessoa para ver os detalhes.</span>
+              <button type="button" class="link-btn" id="btn-ranking-todos" hidden></button>
+            </div>
+          </div>
+          <div class="cartao">
+            <div class="cartao-cab"><h3>Por nicho <span class="selo-top">Top 5</span></h3></div>
+            <div id="por-nicho"></div>
+            <div class="rodape-cartao">
+              <span class="dica">Clique para ver as prospecções do nicho.</span>
+              <a class="link-btn" href="#nichos" id="link-nichos">Ver todos os nichos</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="cartao bloco">
+          <div class="cartao-cab">
+            <div>
+              <h3>Relatório mês a mês</h3>
+              <p class="dica" id="rel-sub">Quem mais prospectou em cada mês. Clique num mês para filtrar o painel.</p>
+            </div>
+          </div>
+          <div id="relatorio"></div>
+        </div>
+      </section>
+
+      <!-- Meus ganhos (funcionário) -->
+      <section class="view" id="view-ganhos">
+        <div class="cab">
+          <div>
+            <h2>Meus ganhos</h2>
+            <p class="dica">Comissão de cada contrato que você fechou. Os valores aparecem quando o administrador registra o contrato.</p>
+          </div>
+        </div>
+        <div class="filtro-periodo" id="fp-ganhos"></div>
+        <div class="kpis kpis-4" id="gan-kpis"></div>
+
+        <div class="cartao bloco">
+          <div class="cartao-cab">
+            <h3>Comissão por mês</h3>
+            <div class="legenda">
+              <span><i class="s-aceitou"></i>Recebido</span>
+              <span><i class="s-pensando"></i>A receber</span>
+            </div>
+          </div>
+          <div id="gan-meses"></div>
+        </div>
+
+        <div class="cartao bloco">
+          <div class="cartao-cab">
+            <h3>Contratos</h3>
+            <span class="dica" id="gan-qtd"></span>
+          </div>
+          <div class="gan-filtros">
+            <input type="search" id="gan-busca" placeholder="Buscar empresa ou projeto…" aria-label="Buscar contratos">
+            <div class="segmentado" id="gan-status" role="group" aria-label="Situação">
+              <button type="button" data-s="">Todos</button>
+              <button type="button" data-s="areceber">A receber</button>
+              <button type="button" data-s="recebido">Recebidos</button>
+            </div>
+          </div>
+          <div id="gan-lista"></div>
+          <button type="button" class="btn largo" id="gan-mais" hidden>Mostrar mais</button>
+        </div>
+      </section>
+
+      <!-- Observações -->
+      <section class="view" id="view-observacoes">
+        <div class="cab">
+          <div>
+            <h2>Observações</h2>
+            <p class="dica">Anotações e problemas das empresas prospectadas. Veja o que elas têm em comum.</p>
+          </div>
+        </div>
+        <div class="filtro-periodo" id="fp-obs"></div>
+        <div class="grade-obs">
+          <div class="cartao">
+            <div class="cartao-cab">
+              <div>
+                <h3>Problemas mais comuns</h3>
+                <p class="dica" id="obs-sub"></p>
+              </div>
+            </div>
+            <div id="obs-problemas"></div>
+          </div>
+          <div class="cartao">
+            <div class="cartao-cab"><h3 id="obs-titulo">Anotações</h3><span class="dica" id="obs-qtd"></span></div>
+            <div class="obs-filtros">
+              <input type="search" id="obs-busca" placeholder="Buscar empresa ou anotação…" aria-label="Buscar nas anotações">
+              <select id="obs-nicho" aria-label="Nicho"></select>
+            </div>
+            <div id="obs-ativo"></div>
+            <div class="obs-lista" id="obs-lista"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Equipe (só ADM) -->
+      <section class="view" id="view-equipe">
+        <div class="cab">
+          <div>
+            <h2>Equipe</h2>
+            <p class="dica" id="eq-dica">Só a gestão vê esta tela. Crie aqui o login e a senha de cada funcionário.</p>
+          </div>
+          <button class="btn primario" id="btn-novo-usuario" data-perm="equipe">+ Novo funcionário</button>
+        </div>
+        <div class="filtro-periodo" id="fp-equipe"></div>
+        <div class="equipe-filtros">
+          <input type="search" id="eq-busca" placeholder="Buscar funcionário pelo nome ou login…" aria-label="Buscar funcionário">
+          <select id="eq-ordem" aria-label="Ordenar">
+            <option value="posicao">Ordenar por posição no ranking</option>
+            <option value="nome">Ordenar por nome (A–Z)</option>
+            <option value="taxa">Ordenar por taxa de aceite</option>
+          </select>
+        </div>
+        <div class="lista rolagem-lista" id="lista-usuarios"></div>
+      </section>
+
+      <!-- Nichos -->
+      <section class="view" id="view-nichos">
+        <div class="cab">
+          <div>
+            <h2>Nichos</h2>
+            <p class="dica">Todos os nichos prospectados. Clique num nicho para ver as empresas dele.</p>
+          </div>
+        </div>
+        <div class="filtro-periodo" id="fp-nichos"></div>
+        <div class="equipe-filtros">
+          <input type="search" id="ni-busca" placeholder="Buscar nicho…" aria-label="Buscar nicho">
+          <select id="ni-ordem" aria-label="Ordenar">
+            <option value="total">Mais prospectados</option>
+            <option value="taxa">Maior taxa de aceite</option>
+            <option value="aceitou">Mais aceitaram</option>
+            <option value="nome">Nome (A–Z)</option>
+          </select>
+        </div>
+        <div class="cartao">
+          <div class="cartao-cab">
+            <h3 id="ni-titulo">Nichos</h3>
+            <div class="legenda">
+              <span><i class="s-aceitou"></i>Aceitou</span>
+              <span><i class="s-pensando"></i>Pensando</span>
+              <span><i class="s-recusou"></i>Recusou</span>
+            </div>
+          </div>
+          <div id="ni-lista"></div>
+        </div>
+      </section>
+
+      <!-- Financeiro (só ADM) -->
+      <section class="view" id="view-financeiro">
+        <div class="cab">
+          <div>
+            <h2>Financeiro</h2>
+            <p class="dica" id="fin-dica">Só a gestão vê esta tela. Contratos fechados, quanto você recebe e a comissão de cada pessoa.</p>
+          </div>
+        </div>
+        <div class="filtro-periodo" id="fp-fin"></div>
+        <div class="busca-fin">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+          <input type="search" id="fin-busca" placeholder="Buscar funcionário para ver só o financeiro dele…" aria-label="Buscar funcionário no financeiro">
+        </div>
+        <p class="aviso-busca" id="fin-aviso" hidden></p>
+
+        <div class="kpis" id="fin-kpis"></div>
+
+        <div class="grade-painel">
+          <div class="cartao">
+            <div class="cartao-cab">
+              <h3>Faturamento por mês</h3>
+              <div class="legenda">
+                <span><i class="s-lucro"></i><span class="rot-lucro">Seu lucro</span></span>
+                <span><i class="s-comissao"></i>Comissões</span>
+              </div>
+            </div>
+            <div id="fin-meses"></div>
+          </div>
+          <div class="cartao">
+            <div class="cartao-cab"><h3>Regra de comissão</h3></div>
+            <form id="form-regra" class="form-regra" data-perm-form="regra">
+              <p class="dica">Comissão = valor fixo + porcentagem do valor do projeto, sem limite. Mudar a regra vale para os próximos contratos; os já registrados mantêm o valor. Em cada contrato você também pode definir a comissão na mão.</p>
+              <div class="duas">
+                <label>Valor fixo (R$)<input name="fixa" inputmode="decimal" required></label>
+                <label>Porcentagem (%)<input name="percentual" inputmode="decimal" required></label>
+              </div>
+              <div class="exemplos" id="regra-exemplos"></div>
+              <button class="btn primario">Salvar regra</button>
+            </form>
+          </div>
+        </div>
+
+        <div class="cartao bloco">
+          <div class="cartao-cab">
+            <h3>Comissão por funcionário</h3>
+            <div class="legenda">
+              <span><i class="s-vendido"></i>Vendeu</span>
+              <span><i class="s-comissao"></i>Comissão</span>
+            </div>
+          </div>
+          <div id="fin-equipe"></div>
+        </div>
+
+        <div class="cartao bloco" id="criador">
+          <div class="cartao-cab">
+            <div>
+              <h3>Criar gráfico</h3>
+              <p class="dica">Escolha o tipo, o que mostrar e quem aparece. Usa o mesmo período do filtro lá em cima.</p>
+            </div>
+          </div>
+          <div class="criador-grade">
+            <div class="criador-opcoes">
+              <div class="op-grupo">
+                <span class="rotulo-op">Tipo de gráfico</span>
+                <div class="tipos" id="cg-tipos">
+                  <button type="button" data-tipo="colunas"><svg viewBox="0 0 40 28"><rect x="4" y="12" width="6" height="14" rx="1"/><rect x="13" y="6" width="6" height="20" rx="1"/><rect x="22" y="15" width="6" height="11" rx="1"/><rect x="31" y="3" width="6" height="23" rx="1"/></svg>Colunas</button>
+                  <button type="button" data-tipo="barras"><svg viewBox="0 0 40 28"><rect x="3" y="3" width="30" height="5" rx="1"/><rect x="3" y="11.5" width="22" height="5" rx="1"/><rect x="3" y="20" width="14" height="5" rx="1"/></svg>Barras</button>
+                  <button type="button" data-tipo="linhas"><svg viewBox="0 0 40 28"><polyline points="3,22 12,14 21,17 30,6 37,9" fill="none" stroke-width="2.5"/><polyline points="3,25 12,21 21,11 30,13 37,4" fill="none" stroke-width="2.5" opacity=".45"/></svg>Linhas</button>
+                  <button type="button" data-tipo="pizza"><svg viewBox="0 0 40 28"><path d="M20 14 L20 2 A12 12 0 0 1 31.4 17.7 Z"/><path d="M20 14 L31.4 17.7 A12 12 0 0 1 12 23" opacity=".6"/><path d="M20 14 L12 23 A12 12 0 0 1 20 2" opacity=".3"/></svg>Pizza</button>
+                </div>
+              </div>
+              <div class="op-grupo">
+                <span class="rotulo-op">Mostrar</span>
+                <div class="segmentado" id="cg-medida">
+                  <button type="button" data-m="vendido">Faturamento</button>
+                  <button type="button" data-m="comissao">Comissão</button>
+                  <button type="button" data-m="contratos">Contratos</button>
+                </div>
+              </div>
+              <div class="op-grupo">
+                <span class="rotulo-op">Quem aparece
+                  <span class="links-op"><button type="button" id="cg-todos">Todos</button> · <button type="button" id="cg-nenhum">Nenhum</button></span>
+                </span>
+                <div class="pessoas" id="cg-pessoas"></div>
+              </div>
+            </div>
+            <div class="criador-grafico">
+              <div class="cg-legenda" id="cg-legenda"></div>
+              <div class="cg-area" id="cg-area"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="cartao bloco" id="fin-pendentes-box">
+          <div class="cartao-cab">
+            <h3>Aceitaram e ainda não têm contrato</h3>
+          </div>
+          <div id="fin-pendentes"></div>
+        </div>
+
+        <div class="cartao bloco">
+          <div class="cartao-cab">
+            <h3>Contratos fechados</h3>
+            <span class="dica" id="fin-qtd"></span>
+          </div>
+          <div id="fin-contratos"></div>
+        </div>
+      </section>
+
+      <!-- Perfil -->
+      <section class="view" id="view-perfil">
+        <div class="cab"><h2>Perfil e configurações</h2></div>
+        <div class="cartao perfil">
+          <div class="perfil-topo">
+            <div id="perfil-avatar"></div>
+            <div>
+              <h3 id="perfil-nome"></h3>
+              <p class="dica" id="perfil-login"></p>
+            </div>
+          </div>
+
+          <h4>Foto <span class="opcional">opcional</span></h4>
+          <p class="dica">Se quiser, coloque uma foto. Ela aparece no painel e na lista para facilitar a identificação.</p>
+          <div class="linha-botoes">
+            <label class="btn">Escolher foto<input type="file" accept="image/*" id="in-foto" hidden></label>
+            <button class="btn fantasma" id="btn-remover-foto">Remover foto</button>
+          </div>
+
+          <div id="meus-ganhos" hidden></div>
+
+          <div class="so-admin" id="config-marca">
+            <h4>Nome do sistema</h4>
+            <p class="dica">Aparece no topo, na tela de login e na aba do navegador, para toda a equipe. Pode trocar quando quiser.</p>
+            <form id="form-marca" class="form-marca">
+              <input name="nome" maxlength="40" minlength="2" required aria-label="Nome do sistema">
+              <button class="btn">Salvar nome</button>
+            </form>
+          </div>
+
+          <h4>Aparência</h4>
+          <p class="dica">Tema deste aparelho. “Automático” segue o modo claro/escuro do sistema.</p>
+          <div class="segmentado" id="tema" style="margin-top:12px">
+            <button type="button" data-tema="auto">Automático</button>
+            <button type="button" data-tema="claro">Claro</button>
+            <button type="button" data-tema="escuro">Escuro</button>
+          </div>
+
+          <h4>Trocar senha</h4>
+          <form id="form-senha" class="form-senha">
+            <label>Senha atual<input type="password" name="atual" autocomplete="current-password" required></label>
+            <label>Nova senha<input type="password" name="nova" autocomplete="new-password" minlength="6" required></label>
+            <button class="btn">Salvar nova senha</button>
+          </form>
+
+          <hr>
+          <button class="btn perigo" id="btn-sair">Sair da conta</button>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- ===== DIÁLOGO: nova / editar prospecção ===== -->
+  <dialog id="dlg-prosp">
+    <form id="form-prosp" class="dlg-corpo">
+      <div class="dlg-cab">
+        <h3 id="dlg-prosp-titulo">Nova prospecção</h3>
+        <button type="button" class="fechar" data-fechar aria-label="Fechar">×</button>
+      </div>
+
+      <label>Nome da empresa *<input name="empresa" required maxlength="120" placeholder="Ex.: Barbearia do Zé"></label>
+
+      <div class="campo">
+        <label for="in-nicho">Nicho</label>
+        <div class="combo" id="combo-nicho">
+          <input id="in-nicho" name="nicho" maxlength="60" autocomplete="off" placeholder="Escolha um ou digite um novo"
+                 role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="combo-lista">
+          <button type="button" class="combo-seta" tabindex="-1" aria-label="Mostrar nichos">
+            <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+          <ul class="combo-lista" id="combo-lista" role="listbox" hidden></ul>
+        </div>
+        <small>Digite para filtrar. Se o nicho não existir, ele é criado e fica salvo para todo mundo.</small>
+      </div>
+
+      <div class="campo">
+        <label for="in-prob">Problemas da empresa</label>
+        <div class="tags" id="tags-prob">
+          <div class="tags-caixa">
+            <span class="tags-chips" id="prob-chips"></span>
+            <input id="in-prob" autocomplete="off" maxlength="60" placeholder="Digite um problema e aperte Enter"
+                   role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="prob-lista">
+          </div>
+          <ul class="combo-lista" id="prob-lista" role="listbox" hidden></ul>
+        </div>
+        <small>Digite e aperte Enter (ou vírgula) para virar uma etiqueta. Pode colocar vários. Os que a equipe já usou aparecem como sugestão.</small>
+      </div>
+
+      <fieldset class="status-escolha">
+        <legend>Resultado *</legend>
+        <label class="op aceitou"><input type="radio" name="status" value="aceitou"><span>Aceitou</span></label>
+        <label class="op pensando"><input type="radio" name="status" value="pensando" checked><span>Pensando</span></label>
+        <label class="op recusou"><input type="radio" name="status" value="recusou"><span>Recusou</span></label>
+      </fieldset>
+
+      <label>Número da empresa<input name="telefone" type="tel" maxlength="40" placeholder="(81) 99999-9999"></label>
+
+      <details class="mais" id="mais-info">
+        <summary>Mais informações da empresa</summary>
+        <label>Localidade<input name="localidade" maxlength="150" placeholder="Bairro, cidade"></label>
+        <label>Instagram<input name="instagram" maxlength="200" placeholder="@empresa ou link"></label>
+        <label>Site<input name="site" maxlength="200" placeholder="www.empresa.com.br"></label>
+        <label>Outras redes (uma por linha)<textarea name="outras_redes" rows="2" maxlength="400" placeholder="facebook.com/empresa"></textarea></label>
+      </details>
+
+      <label>Anotações<textarea name="anotacoes" rows="4" maxlength="5000" placeholder="Com quem falou, o que ofereceu, quando retornar…"></textarea></label>
+
+      <p class="msg-erro" id="prosp-erro"></p>
+      <div class="dlg-rodape">
+        <button type="button" class="btn fantasma" data-fechar>Cancelar</button>
+        <button class="btn primario">Salvar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- ===== DIÁLOGO: detalhes ===== -->
+  <dialog id="dlg-detalhe"><div class="dlg-corpo" id="detalhe"></div></dialog>
+
+  <!-- ===== DIÁLOGO: usuário (ADM) ===== -->
+  <dialog id="dlg-usuario">
+    <form id="form-usuario" class="dlg-corpo">
+      <div class="dlg-cab">
+        <h3 id="dlg-usuario-titulo">Novo funcionário</h3>
+        <button type="button" class="fechar" data-fechar aria-label="Fechar">×</button>
+      </div>
+      <label>Nome<input name="nome" required maxlength="80" placeholder="Nome de quem vai usar"></label>
+      <label>Login<input name="login" required maxlength="40" autocapitalize="none" placeholder="ex.: joao.silva"></label>
+      <label>Senha<input name="senha" type="text" minlength="6" maxlength="100" autocomplete="off">
+        <small id="dica-senha">Mínimo de 6 caracteres. Passe essa senha para a pessoa.</small>
+      </label>
+      <div id="campo-cargo">
+        <label>Cargo
+          <select name="papel">
+            <option value="funcionario">Funcionário — prospecta e vê o próprio ganho</option>
+            <option value="gerente">Gerente — vê tudo, só altera o que você liberar</option>
+            <option value="admin">Administrador — acesso total</option>
+          </select>
+        </label>
+        <fieldset class="permissoes" id="campo-permissoes" hidden>
+          <legend>O que este gerente pode <b>alterar</b></legend>
+          <p class="dica">Ver, ele vê tudo (Equipe, Financeiro, contratos). Marque só o que ele também pode mudar.</p>
+          <label class="check"><input type="checkbox" name="perm_contratos"> <span><b>Contratos</b><small>Registrar, editar, excluir e marcar comissão como paga</small></span></label>
+          <label class="check"><input type="checkbox" name="perm_regra"> <span><b>Regra de comissão</b><small>Mudar o valor fixo e a porcentagem</small></span></label>
+          <label class="check"><input type="checkbox" name="perm_equipe"> <span><b>Equipe</b><small>Criar, editar e desativar funcionários (nunca gerentes ou ADM)</small></span></label>
+          <label class="check"><input type="checkbox" name="perm_prospeccoes"> <span><b>Prospecções de todos</b><small>Editar e excluir prospecções de outras pessoas</small></span></label>
+        </fieldset>
+        <label class="check"><input type="checkbox" name="verificado"> <span>Selo de <b>verificado</b> <span class="verif" aria-hidden="true"><svg viewBox="0 0 24 24"><path class="sv-f" d="M12 1.8l2.4 1.8 3-.2 1 2.8 2.6 1.6-.8 2.9 1.2 2.7-2.2 2 .1 3-2.9.7-1.5 2.6-2.9-.9L12 22.2l-2.4-1.8-2.9.9-1.5-2.6-2.9-.7.1-3-2.2-2 1.2-2.7-.8-2.9 2.6-1.6 1-2.8 3 .2z"/><path class="sv-c" d="M7.8 12.3l2.8 2.8 5.6-5.8"/></svg></span><small>Só você pode dar ou tirar o selo. Aparece ao lado do nome em todo o sistema.</small></span></label>
+      </div>
+      <label class="check" id="campo-ativo"><input type="checkbox" name="ativo"> Acesso ativo (pode entrar no sistema)</label>
+      <p class="msg-erro" id="usuario-erro"></p>
+      <div class="dlg-rodape">
+        <button type="button" class="btn fantasma" data-fechar>Cancelar</button>
+        <button class="btn primario">Salvar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- ===== DIÁLOGO: contrato (ADM) ===== -->
+  <dialog id="dlg-contrato">
+    <form id="form-contrato" class="dlg-corpo">
+      <div class="dlg-cab">
+        <div>
+          <h3 id="ctr-titulo">Contrato</h3>
+          <p class="dica" id="ctr-quem"></p>
+        </div>
+        <button type="button" class="fechar" data-fechar aria-label="Fechar">×</button>
+      </div>
+      <label>Projeto<input name="projeto" maxlength="200" placeholder="Ex.: Site institucional"></label>
+      <div class="duas">
+        <label>Valor do projeto (R$) *<input name="valor" inputmode="decimal" placeholder="450,00" required></label>
+        <label>Data do fechamento<input name="fechado_em" type="date"></label>
+      </div>
+
+      <fieldset class="modo-com" id="ctr-modo">
+        <legend>Comissão do funcionário</legend>
+        <label class="linha-op"><input type="radio" name="modo" value="auto" checked>
+          <span>Automática <b id="ctr-auto">R$ 0,00</b><small id="ctr-regra"></small></span></label>
+        <label class="linha-op"><input type="radio" name="modo" value="manual">
+          <span>Eu defino o valor</span></label>
+        <div class="manual-linha" id="ctr-manual-linha" hidden>
+          <input name="comissao_manual" id="ctr-manual" inputmode="decimal" placeholder="Ex.: 150,00 ou 15%" aria-label="Comissão definida por você">
+          <div class="segmentado unidade" id="ctr-unidade" role="group" aria-label="Unidade da comissão">
+            <button type="button" data-u="valor">R$</button>
+            <button type="button" data-u="pct">%</button>
+          </div>
+        </div>
+        <small class="dica-manual" id="ctr-manual-dica" hidden></small>
+      </fieldset>
+      <p class="aviso-adm" id="ctr-adm" hidden>Você mesmo fechou este contrato: não há comissão, o valor é todo seu.</p>
+
+      <div class="divisao" id="ctr-divisao"></div>
+
+      <label class="check" id="ctr-paga-campo"><input type="checkbox" name="comissao_paga"> Comissão já foi paga ao funcionário</label>
+
+      <p class="msg-erro" id="ctr-erro"></p>
+      <div class="dlg-rodape">
+        <button type="button" class="btn fantasma perigo" id="ctr-excluir" hidden>Excluir contrato</button>
+        <span class="espaco"></span>
+        <button type="button" class="btn fantasma" data-fechar>Cancelar</button>
+        <button class="btn primario">Salvar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- ===== DIÁLOGO: funcionário (clique no painel) ===== -->
+  <dialog id="dlg-func"><div class="dlg-corpo" id="func-corpo"></div></dialog>
+
+  <datalist id="lista-nichos"></datalist>
+  <div id="toast" class="toast" role="status"></div>
+  <script src="app.js"></script>
+</body>
+</html>
