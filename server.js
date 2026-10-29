@@ -18,7 +18,9 @@ if (!SECRET) {
 }
 
 app.set('trust proxy', 1);
-app.use(express.json({ limit: '1mb' }));
+const jsonNormal = express.json({ limit: '1mb' });
+const jsonBackup = express.json({ limit: '60mb' }); // backup pode ter fotos
+app.use((req, res, next) => (req.path === '/api/backup/restaurar' ? jsonBackup : jsonNormal)(req, res, next));
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -29,6 +31,22 @@ app.get('/saude', (req, res) => res.json({ ok: true }));
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const txt = (v, max = 500) => (typeof v === 'string' ? v.trim().slice(0, max) : '') || null;
 const erro = (res, status, msg) => res.status(status).json({ erro: msg });
+
+// ---------- histórico ----------
+// Guarda quem fez o quê. Nunca derruba a ação principal se falhar.
+async function registrar(req, tipo, acao, alvoId, descricao) {
+  try {
+    await pool.query(
+      'INSERT INTO historico (usuario_id, usuario_nome, tipo, acao, alvo_id, descricao) VALUES ($1, $2, $3, $4, $5, $6)',
+      [req.user?.id ?? null, req.user?.nome ?? null, tipo, acao, alvoId ?? null, String(descricao).slice(0, 1000)]
+    );
+  } catch (e) {
+    console.warn('Não consegui registrar no histórico:', e.message);
+  }
+}
+const reais = (n) => Number(n || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const dataBR = (iso) => (iso ? iso.slice(0, 10).split('-').reverse().join('/') : '');
+const NOME_STATUS = { aceitou: 'Aceitou', pensando: 'Pensando', recusou: 'Recusou' };
 
 // ---------- cargos e permissões ----------
 // admin       = dono, acesso total
@@ -115,6 +133,7 @@ app.put('/api/marca', auth, soAdmin, wrap(async (req, res) => {
      ON CONFLICT (chave) DO UPDATE SET valor = EXCLUDED.valor`,
     [JSON.stringify({ nome })]
   );
+  await registrar(req, 'sistema', 'editou', null, `mudou o nome do sistema para “${nome}”`);
   res.json({ nome });
 }));
 
@@ -142,6 +161,7 @@ app.put('/api/me/senha', auth, wrap(async (req, res) => {
   const { rows } = await pool.query('SELECT senha_hash FROM usuarios WHERE id = $1', [req.user.id]);
   if (!(await bcrypt.compare(String(atual || ''), rows[0].senha_hash))) return erro(res, 400, 'Senha atual incorreta.');
   await pool.query('UPDATE usuarios SET senha_hash = $1 WHERE id = $2', [await bcrypt.hash(nova, 10), req.user.id]);
+  await registrar(req, 'equipe', 'senha', req.user.id, 'trocou a própria senha');
   res.json({ ok: true });
 }));
 
@@ -155,6 +175,8 @@ app.get('/api/equipe', auth, wrap(async (req, res) => {
 // Admin: tudo. Gerente com a permissão "equipe": cria, edita e desativa só funcionários.
 // Cargo, permissões e selo de verificado: só o admin muda.
 const LOGIN_OK = /^[a-z0-9._-]{3,40}$/;
+const NOME_PAPEL = { admin: 'Administrador', gerente: 'Gerente', funcionario: 'Funcionário' };
+const NOME_PERM = { contratos: 'contratos', regra: 'regra de comissão', equipe: 'equipe', prospeccoes: 'prospecções de todos' };
 const CAMPOS_U = 'id, nome, login, papel, foto, ativo, verificado, permissoes';
 
 app.get('/api/usuarios', auth, soGestao, wrap(async (req, res) => {
@@ -188,6 +210,8 @@ app.post('/api/usuarios', auth, precisa('equipe', 'Você não tem permissão par
        RETURNING ${CAMPOS_U}`,
       [nome, login, await bcrypt.hash(senha, 10), papel, JSON.stringify(permissoes), verificado]
     );
+    await registrar(req, 'equipe', 'criou', rows[0].id,
+      `criou o login de ${nome} (${login}) como ${NOME_PAPEL[papel]}${verificado ? ', com selo de verificado' : ''}`);
     res.status(201).json(publico(rows[0]));
   } catch (e) {
     if (e.code === '23505') return erro(res, 409, 'Já existe alguém com esse login.');
@@ -229,6 +253,19 @@ app.put('/api/usuarios/:id', auth, precisa('equipe', 'Você não tem permissão 
        RETURNING ${CAMPOS_U}`,
       [nome, login, papel, ativo, hash, verificado, JSON.stringify(permissoes), id]
     );
+    const mud = [];
+    if (nome !== u.nome) mud.push(`nome “${u.nome}” → “${nome}”`);
+    if (login !== u.login) mud.push(`login ${u.login} → ${login}`);
+    if (papel !== u.papel) mud.push(`cargo ${NOME_PAPEL[u.papel]} → ${NOME_PAPEL[papel]}`);
+    const antes = limparPermissoes(u.permissoes);
+    const liberou = PERMISSOES.filter((k) => permissoes[k] && !antes[k]).map((k) => NOME_PERM[k]);
+    const tirou = PERMISSOES.filter((k) => !permissoes[k] && antes[k]).map((k) => NOME_PERM[k]);
+    if (liberou.length) mud.push(`liberou ${liberou.join(', ')}`);
+    if (tirou.length) mud.push(`tirou ${tirou.join(', ')}`);
+    if (verificado !== Boolean(u.verificado)) mud.push(verificado ? 'deu o selo de verificado' : 'tirou o selo de verificado');
+    if (ativo !== u.ativo) mud.push(ativo ? 'reativou o acesso' : 'desativou o acesso');
+    if (senha) mud.push('trocou a senha');
+    if (mud.length) await registrar(req, 'equipe', 'editou', id, `editou ${nome}: ${mud.join('; ')}`);
     res.json(publico(r.rows[0]));
   } catch (e) {
     if (e.code === '23505') return erro(res, 409, 'Já existe alguém com esse login.');
@@ -246,7 +283,9 @@ app.delete('/api/usuarios/:id', auth, precisa('equipe', 'Você não tem permiss�
   if (rows[0].n > 0) {
     return erro(res, 409, `Essa pessoa tem ${rows[0].n} prospecção(ões). Desative o acesso em vez de excluir, para não perder o histórico.`);
   }
+  const quem = (await pool.query('SELECT nome, login FROM usuarios WHERE id = $1', [id])).rows[0];
   await pool.query('DELETE FROM usuarios WHERE id = $1', [id]);
+  await registrar(req, 'equipe', 'excluiu', id, `excluiu o login de ${quem.nome} (${quem.login})`);
   res.json({ ok: true });
 }));
 
@@ -327,6 +366,8 @@ app.get('/api/anos', auth, wrap(async (req, res) => {
 // ---------- prospecções ----------
 const SELECT_P = `
   SELECT p.*, n.nome AS nicho, u.nome AS usuario_nome,
+         to_char(p.retorno_em, 'YYYY-MM-DD') AS retorno,
+         (p.retorno_em - CURRENT_DATE) AS retorno_dias,
          COALESCE((SELECT json_agg(pr.nome ORDER BY lower(pr.nome))
                      FROM prospeccao_problemas pp JOIN problemas pr ON pr.id = pp.problema_id
                     WHERE pp.prospeccao_id = p.id), '[]'::json) AS problemas
@@ -372,6 +413,13 @@ app.get('/api/prospeccoes', auth, wrap(async (req, res) => {
   res.json(rows);
 }));
 
+// data de retorno: "AAAA-MM-DD" ou vazio (sem retorno). undefined = inválida
+function lerRetorno(v) {
+  if (v === undefined || v === null || v === '') return null;
+  return dataOk(v) ? v : undefined;
+}
+const deQuem = (req, p) => (p.usuario_id === req.user.id ? '' : ` (de ${p.usuario_nome})`);
+
 async function buscarProsp(id) {
   const { rows } = await pool.query(`${SELECT_P} WHERE p.id = $1`, [id]);
   return rows[0];
@@ -384,13 +432,17 @@ app.post('/api/prospeccoes', auth, wrap(async (req, res) => {
   if (!d.empresa) return erro(res, 400, 'Coloque o nome da empresa.');
   if (!STATUS.includes(b.status)) return erro(res, 400, 'Escolha se aceitou, recusou ou está pensando.');
 
+  const retorno = lerRetorno(b.retorno_em);
+  if (retorno === undefined) return erro(res, 400, 'Data de retorno inválida.');
   const nid = await nichoId(b.nicho, req.user.id);
   const { rows } = await pool.query(
-    `INSERT INTO prospeccoes (empresa, nicho_id, status, telefone, localidade, instagram, site, outras_redes, anotacoes, usuario_id)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
-    [d.empresa, nid, b.status, d.telefone, d.localidade, d.instagram, d.site, d.outras_redes, d.anotacoes, req.user.id]
+    `INSERT INTO prospeccoes (empresa, nicho_id, status, telefone, localidade, instagram, site, outras_redes, anotacoes, usuario_id, retorno_em)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::date) RETURNING id`,
+    [d.empresa, nid, b.status, d.telefone, d.localidade, d.instagram, d.site, d.outras_redes, d.anotacoes, req.user.id, retorno]
   );
   await salvarProblemas(rows[0].id, b.problemas, req.user.id);
+  await registrar(req, 'prospeccao', 'criou', rows[0].id,
+    `cadastrou ${d.empresa} (${NOME_STATUS[b.status]})${retorno ? ` com retorno para ${dataBR(retorno)}` : ''}`);
   res.status(201).json(await buscarProsp(rows[0].id));
 }));
 
@@ -407,14 +459,45 @@ app.put('/api/prospeccoes/:id', auth, wrap(async (req, res) => {
   const status = 'status' in b ? b.status : atual.status;
   if (!STATUS.includes(status)) return erro(res, 400, 'Status inválido.');
   const nid = 'nicho' in b ? await nichoId(b.nicho, req.user.id) : atual.nicho_id;
+  // retorno: se a empresa aceitou ou recusou (e ninguém mandou outra data), o lembrete sai sozinho
+  let retorno = atual.retorno;
+  if ('retorno_em' in b) {
+    retorno = lerRetorno(b.retorno_em);
+    if (retorno === undefined) return erro(res, 400, 'Data de retorno inválida.');
+  } else if (status !== atual.status && status !== 'pensando') {
+    retorno = null;
+  }
+  const encerrou = !('retorno_em' in b) && atual.retorno && !retorno;
 
   await pool.query(
     `UPDATE prospeccoes SET empresa=$1, nicho_id=$2, status=$3, telefone=$4, localidade=$5, instagram=$6,
-            site=$7, outras_redes=$8, anotacoes=$9, atualizado_em=now() WHERE id=$10`,
-    [d.empresa, nid, status, d.telefone, d.localidade, d.instagram, d.site, d.outras_redes, d.anotacoes, atual.id]
+            site=$7, outras_redes=$8, anotacoes=$9, retorno_em=$10::date, atualizado_em=now() WHERE id=$11`,
+    [d.empresa, nid, status, d.telefone, d.localidade, d.instagram, d.site, d.outras_redes, d.anotacoes, retorno, atual.id]
   );
+  const antesProb = JSON.stringify(atual.problemas || []);
   if ('problemas' in b) await salvarProblemas(atual.id, b.problemas, req.user.id);
-  res.json(await buscarProsp(atual.id));
+  const novo = await buscarProsp(atual.id);
+
+  // o que mudou, em português
+  const mud = [];
+  if (status !== atual.status) mud.push(`resultado ${NOME_STATUS[atual.status]} → ${NOME_STATUS[status]}`);
+  if (retorno !== atual.retorno) {
+    if (retorno) mud.push(`retorno para ${dataBR(retorno)}`);
+    else if (b.retorno_feito) mud.push('retorno feito');
+    else if (encerrou) mud.push('retorno encerrado');
+    else mud.push('tirou o retorno');
+  }
+  if (d.empresa !== atual.empresa) mud.push(`nome “${atual.empresa}” → “${d.empresa}”`);
+  const campos = { telefone: 'número', localidade: 'localidade', instagram: 'Instagram', site: 'site', outras_redes: 'outras redes', anotacoes: 'anotações' };
+  const outros = Object.keys(campos).filter((c) => (d[c] || null) !== (atual[c] || null)).map((c) => campos[c]);
+  if (nid !== atual.nicho_id) outros.unshift('nicho');
+  if (JSON.stringify(novo.problemas || []) !== antesProb) outros.push('problemas');
+  if (outros.length) mud.push(`mudou ${outros.join(', ')}`);
+  if (mud.length) {
+    await registrar(req, 'prospeccao', b.retorno_feito ? 'retorno' : 'editou', atual.id,
+      `${novo.empresa}${deQuem(req, atual)}: ${mud.join('; ')}`);
+  }
+  res.json(novo);
 }));
 
 app.delete('/api/prospeccoes/:id', auth, wrap(async (req, res) => {
@@ -423,8 +506,30 @@ app.delete('/api/prospeccoes/:id', auth, wrap(async (req, res) => {
   if (!pode(req.user, 'prospeccoes') && atual.usuario_id !== req.user.id) {
     return erro(res, 403, 'Você só pode excluir as suas prospecções.');
   }
+  // apagar a prospecção apaga junto o contrato: isso só quem pode mexer em contratos
+  const ctr = (await pool.query('SELECT valor::float8 AS valor FROM contratos WHERE prospeccao_id = $1', [atual.id])).rows[0];
+  if (ctr && !pode(req.user, 'contratos')) {
+    return erro(res, 409, 'Essa empresa já tem contrato registrado. Só o administrador pode excluir.');
+  }
   await pool.query('DELETE FROM prospeccoes WHERE id = $1', [atual.id]);
+  await registrar(req, 'prospeccao', 'excluiu', atual.id,
+    `excluiu ${atual.empresa}${deQuem(req, atual)}${ctr ? ` e o contrato de ${reais(ctr.valor)}` : ''}`);
   res.json({ ok: true });
+}));
+
+// ---------- retornos (lembretes de ligar de novo) ----------
+// Atrasados, de hoje e dos próximos 7 dias. Funcionário vê os dele; gestão pode ver os da equipe (?todos=1).
+app.get('/api/retornos', auth, wrap(async (req, res) => {
+  const todos = req.query.todos === '1' && veTudo(req.user);
+  const params = [];
+  let filtro = '';
+  if (!todos) { params.push(req.user.id); filtro = 'AND p.usuario_id = $1'; }
+  const { rows } = await pool.query(
+    `${SELECT_P} WHERE p.retorno_em IS NOT NULL AND p.retorno_em <= CURRENT_DATE + 7 ${filtro}
+     ORDER BY p.retorno_em, p.empresa`, params);
+  const atrasados = rows.filter((r) => r.retorno_dias < 0).length;
+  const hoje = rows.filter((r) => r.retorno_dias === 0).length;
+  res.json({ itens: rows, atrasados, hoje });
 }));
 
 // ---------- painel ----------
@@ -779,11 +884,16 @@ app.put('/api/financeiro/regra', auth, precisa('regra', 'Você não tem permiss�
   if (Number.isNaN(fixa)) return erro(res, 400, 'Valor fixo inválido.');
   if (!Number.isFinite(percentual) || percentual < 0 || percentual > 100) return erro(res, 400, 'A porcentagem deve ficar entre 0 e 100.');
   const regra = { fixa, percentual: centavos(percentual) };
+  const antes = await regraComissao();
   await pool.query(
     `INSERT INTO config (chave, valor) VALUES ('comissao', $1::jsonb)
      ON CONFLICT (chave) DO UPDATE SET valor = EXCLUDED.valor`,
     [JSON.stringify(regra)]
   );
+  if (antes.fixa !== regra.fixa || antes.percentual !== regra.percentual) {
+    const r = (x) => `${reais(x.fixa)} + ${String(x.percentual).replace('.', ',')}%`;
+    await registrar(req, 'contrato', 'regra', null, `mudou a regra de comissão de ${r(antes)} para ${r(regra)}`);
+  }
   res.json(regra);
 }));
 
@@ -839,8 +949,11 @@ app.post('/api/contratos', auth, precisa('contratos', 'Você não tem permissão
       [pid, d.projeto, d.valor, d.manual, d.pct, auto, d.paga, d.fechado]
     );
     // contrato fechado = a empresa aceitou
-    await pool.query(`UPDATE prospeccoes SET status = 'aceitou', atualizado_em = now() WHERE id = $1 AND status <> 'aceitou'`, [pid]);
-    res.status(201).json(await contratoCompleto(rows[0].id));
+    await pool.query(`UPDATE prospeccoes SET status = 'aceitou', retorno_em = NULL, atualizado_em = now() WHERE id = $1 AND status <> 'aceitou'`, [pid]);
+    const c = await contratoCompleto(rows[0].id);
+    await registrar(req, 'contrato', 'criou', c.id,
+      `registrou contrato de ${c.empresa} (${c.usuario_nome}): ${reais(c.valor)}, comissão ${reais(c.comissao)}`);
+    res.status(201).json(c);
   } catch (e) {
     if (e.code === '23505') return erro(res, 409, 'Essa empresa já tem um contrato registrado.');
     throw e;
@@ -861,12 +974,119 @@ app.put('/api/contratos/:id', auth, precisa('contratos', 'Você não tem permiss
             comissao_paga = $6, fechado_em = COALESCE($7::date, fechado_em) WHERE id = $8`,
     [d.projeto, d.valor, d.manual, d.pct, auto, d.paga, d.fechado, atual.id]
   );
-  res.json(await contratoCompleto(atual.id));
+  const c = await contratoCompleto(atual.id);
+  const mud = [];
+  if (c.valor !== atual.valor) mud.push(`valor ${reais(atual.valor)} → ${reais(c.valor)}`);
+  if (c.comissao !== atual.comissao) mud.push(`comissão ${reais(atual.comissao)} → ${reais(c.comissao)}`);
+  if (c.projeto !== atual.projeto) mud.push('projeto');
+  if (c.fechado_em !== atual.fechado_em) mud.push(`data ${dataBR(atual.fechado_em)} → ${dataBR(c.fechado_em)}`);
+  if (c.comissao_paga !== atual.comissao_paga) {
+    mud.push(c.comissao_paga ? `marcou a comissão de ${reais(c.comissao)} como paga` : 'voltou a comissão para “a pagar”');
+  }
+  if (mud.length) {
+    const soPaga = mud.length === 1 && c.comissao_paga !== atual.comissao_paga;
+    await registrar(req, 'contrato', soPaga ? (c.comissao_paga ? 'pagou' : 'editou') : 'editou', c.id,
+      `contrato de ${c.empresa} (${c.usuario_nome}): ${mud.join('; ')}`);
+  }
+  res.json(c);
 }));
 
 app.delete('/api/contratos/:id', auth, precisa('contratos', 'Você não tem permissão para registrar ou mudar contratos.'), wrap(async (req, res) => {
+  const c = await contratoCompleto(Number(req.params.id));
   await pool.query('DELETE FROM contratos WHERE id = $1', [Number(req.params.id)]);
+  if (c) await registrar(req, 'contrato', 'excluiu', c.id, `excluiu o contrato de ${c.empresa} (${c.usuario_nome}), que era de ${reais(c.valor)}`);
   res.json({ ok: true });
+}));
+
+// ---------- histórico (gestão vê) ----------
+const TIPOS_HIST = ['prospeccao', 'contrato', 'equipe', 'sistema'];
+app.get('/api/historico', auth, soGestao, wrap(async (req, res) => {
+  const params = [];
+  const cond = [];
+  if (req.query.usuario) { params.push(Number(req.query.usuario)); cond.push(`h.usuario_id = $${params.length}`); }
+  if (TIPOS_HIST.includes(req.query.tipo)) { params.push(req.query.tipo); cond.push(`h.tipo = $${params.length}`); }
+  const q = txt(req.query.q, 100);
+  if (q) { params.push('%' + q + '%'); cond.push(`(h.descricao ILIKE $${params.length} OR h.usuario_nome ILIKE $${params.length})`); }
+  const per = periodo(req, 'h.criado_em', params);
+  if (per) cond.push(per.replace(/^ AND /, ''));
+  const { rows } = await pool.query(`
+    SELECT h.id, h.usuario_id, COALESCE(u.nome, h.usuario_nome, 'Sistema') AS usuario_nome,
+           h.tipo, h.acao, h.alvo_id, h.descricao, h.criado_em
+      FROM historico h LEFT JOIN usuarios u ON u.id = h.usuario_id
+     ${cond.length ? 'WHERE ' + cond.join(' AND ') : ''}
+     ORDER BY h.criado_em DESC, h.id DESC LIMIT 1000`, params);
+  res.json(rows);
+}));
+
+// ---------- backup (só o ADM) ----------
+// Baixa tudo num arquivo .json e permite restaurar depois.
+// A ordem importa: quem depende de outra tabela vem depois dela.
+const TABELAS_BACKUP = ['usuarios', 'nichos', 'problemas', 'prospeccoes', 'prospeccao_problemas', 'contratos', 'config', 'historico'];
+
+app.get('/api/backup', auth, soAdmin, wrap(async (req, res) => {
+  const tabelas = {};
+  for (const t of TABELAS_BACKUP) {
+    // o próprio Postgres transforma cada linha em JSON (datas, números e textos ficam exatos)
+    const { rows } = await pool.query(`SELECT COALESCE(json_agg(t), '[]'::json) AS dados FROM ${t} t`);
+    tabelas[t] = rows[0].dados;
+  }
+  const agora = new Date().toISOString();
+  await registrar(req, 'sistema', 'backup', null, 'baixou um backup completo');
+  // data no horário do Brasil (às 23h ainda é "hoje", não amanhã)
+  let dia = agora.slice(0, 10);
+  try { dia = new Date().toLocaleDateString('sv-SE', { timeZone: process.env.FUSO_HORARIO || 'America/Recife' }); } catch { /* fuso inválido: fica UTC */ }
+  res.setHeader('Content-Disposition', `attachment; filename="prospecta-backup-${dia}.json"`);
+  res.json({ app: 'prospecta', versao: 1, gerado_em: agora, tabelas });
+}));
+
+app.post('/api/backup/restaurar', auth, soAdmin, wrap(async (req, res) => {
+  const b = req.body || {};
+  if (b.app !== 'prospecta' || b.versao !== 1 || typeof b.tabelas !== 'object' || !b.tabelas) {
+    return erro(res, 400, 'Esse arquivo não é um backup do sistema.');
+  }
+  for (const t of TABELAS_BACKUP) {
+    if (b.tabelas[t] !== undefined && !Array.isArray(b.tabelas[t])) return erro(res, 400, `Backup com defeito (${t}).`);
+  }
+  const usuarios = b.tabelas.usuarios || [];
+  if (!usuarios.some((u) => u.papel === 'admin' && u.ativo !== false)) {
+    return erro(res, 400, 'O backup precisa ter pelo menos um administrador ativo.');
+  }
+
+  const cliente = await pool.connect();
+  try {
+    await cliente.query('BEGIN');
+    await cliente.query(`TRUNCATE ${TABELAS_BACKUP.join(', ')} RESTART IDENTITY CASCADE`);
+    for (const t of TABELAS_BACKUP) {
+      const linhas = b.tabelas[t] || [];
+      if (!linhas.length) continue;
+      // só as colunas que existem nas duas pontas (backup antigo continua funcionando)
+      const { rows: cols } = await cliente.query(
+        `SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1`, [t]);
+      const existentes = new Set(cols.map((c) => c.column_name));
+      const usar = Object.keys(linhas[0]).filter((c) => existentes.has(c));
+      const lista = usar.map((c) => `"${c}"`).join(', ');
+      await cliente.query(
+        `INSERT INTO ${t} (${lista}) SELECT ${lista} FROM json_populate_recordset(NULL::${t}, $1::json)`,
+        [JSON.stringify(linhas)]
+      );
+    }
+    // os próximos ids continuam depois do maior que voltou
+    for (const t of TABELAS_BACKUP) {
+      if (t === 'prospeccao_problemas' || t === 'config') continue;
+      await cliente.query(`SELECT setval(pg_get_serial_sequence('${t}', 'id'), COALESCE((SELECT MAX(id) FROM ${t}), 0) + 1, false)`);
+    }
+    await cliente.query('COMMIT');
+  } catch (e) {
+    await cliente.query('ROLLBACK').catch(() => {});
+    console.error('Falha ao restaurar backup:', e);
+    return erro(res, 400, 'Não consegui restaurar esse backup. Nada foi alterado.');
+  } finally {
+    cliente.release();
+  }
+  const quando = typeof b.gerado_em === 'string' ? new Date(b.gerado_em).toLocaleString('pt-BR', { timeZone: 'America/Recife' }) : '?';
+  const aindaExiste = (await pool.query('SELECT 1 FROM usuarios WHERE id = $1 AND ativo', [req.user.id])).rows.length > 0;
+  await registrar(aindaExiste ? req : {}, 'sistema', 'restaurou', null, `restaurou o backup de ${quando}`);
+  res.json({ ok: true, sair: !aindaExiste });
 }));
 
 // ---------- erros ----------

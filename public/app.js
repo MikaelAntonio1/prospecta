@@ -298,6 +298,7 @@ async function entrarApp() {
   renderEu();
   await carregarBase();
   rotear();
+  carregarRetornos().catch(() => {});
 }
 
 // mostra/esconde o que depende do cargo e das permissões
@@ -372,14 +373,14 @@ function irParaNicho(nichoId, filtroOrigem) {
 function rotear() {
   if (!estado.eu) return;
   let v = location.hash.slice(1) || 'prospeccoes';
-  if (!['prospeccoes', 'painel', 'nichos', 'observacoes', 'ganhos', 'equipe', 'financeiro', 'perfil'].includes(v)) v = 'prospeccoes';
-  if ((v === 'equipe' || v === 'financeiro') && !veTudo()) v = 'prospeccoes';
+  if (!['prospeccoes', 'painel', 'nichos', 'observacoes', 'ganhos', 'equipe', 'financeiro', 'historico', 'perfil'].includes(v)) v = 'prospeccoes';
+  if ((v === 'equipe' || v === 'financeiro' || v === 'historico') && !veTudo()) v = 'prospeccoes';
   if (v === 'ganhos' && estado.eu.papel === 'admin') v = 'financeiro';
 
   $$('.view').forEach((s) => s.classList.toggle('ativa', s.id === 'view-' + v));
   $$('.abas a').forEach((a) => a.classList.toggle('ativa', a.dataset.view === v));
 
-  ({ prospeccoes: carregarProsp, painel: carregarPainel, nichos: carregarNichos, observacoes: carregarObs, ganhos: carregarGanhos, equipe: carregarUsuarios, financeiro: carregarFinanceiro, perfil: renderPerfil })[v]()
+  ({ prospeccoes: carregarProsp, painel: carregarPainel, nichos: carregarNichos, observacoes: carregarObs, ganhos: carregarGanhos, equipe: carregarUsuarios, financeiro: carregarFinanceiro, historico: carregarHistorico, perfil: renderPerfil })[v]()
     .catch?.((e) => toast(e.message, 'erro'));
 }
 window.addEventListener('hashchange', rotear);
@@ -404,7 +405,8 @@ async function carregarProsp() {
   if ($('#f-status').value) p.set('status', $('#f-status').value);
   if ($('#f-nicho').value) p.set('nicho', $('#f-nicho').value);
   if ($('#f-usuario').value) p.set('usuario', $('#f-usuario').value);
-  estado.prosp = await api('/api/prospeccoes?' + p);
+  const [lista] = await Promise.all([api('/api/prospeccoes?' + p), carregarRetornos().catch(() => {})]);
+  estado.prosp = lista;
   renderLista();
 }
 
@@ -430,6 +432,7 @@ function renderLista() {
           <span class="sub">
             ${p.nicho ? `<span class="tag">${esc(p.nicho)}</span>` : ''}
             ${p.telefone ? `<span>${esc(p.telefone)}</span>` : ''}
+            ${p.retorno ? `<span class="ret-mini ${classeRetorno(p.retorno_dias)}" title="Ligar de novo">${ICONE_RELOGIO}${esc(rotuloRetorno(p.retorno_dias, p.retorno))}</span>` : ''}
           </span>
         </div>
         <span class="chip ${p.status}">${STATUS[p.status]}</span>
@@ -460,7 +463,8 @@ function abrirDetalhe(id) {
   const p = estado.prosp.find((x) => x.id === id) || (estado.obs?.itens || []).find((x) => x.id === id);
   if (!p) return;
   const m = membro(p.usuario_id, p.usuario_nome);
-  const pode = podeEditar(p);
+  // (antes se chamava "pode" e escondia a função pode() → erro ao abrir "Aceitou" sem contrato)
+  const editavel = podeEditar(p);
   const vazio = '<span class="vazio-campo">—</span>';
 
   const zap = linkWhats(p.telefone);
@@ -473,13 +477,13 @@ function abrirDetalhe(id) {
         <h3>${esc(p.empresa)}</h3>
         <div class="det-titulo">
           ${p.nicho ? `<span class="tag">${esc(p.nicho)}</span>` : ''}
-          ${pode ? '' : `<span class="chip ${p.status}">${STATUS[p.status]}</span>`}
+          ${editavel ? '' : `<span class="chip ${p.status}">${STATUS[p.status]}</span>`}
         </div>
       </div>
       <button type="button" class="fechar" data-fechar aria-label="Fechar">×</button>
     </div>
 
-    ${pode ? `
+    ${editavel ? `
       <div class="rotulo">Resultado</div>
       <div class="status-escolha status-rapido">
         ${Object.entries(STATUS).map(([k, v]) => `
@@ -495,6 +499,13 @@ function abrirDetalhe(id) {
       <div class="det-linha"><dt>Instagram</dt><dd>${p.instagram ? campoLink(p.instagram, linkInsta(p.instagram)) : vazio}</dd></div>
       <div class="det-linha"><dt>Site</dt><dd>${p.site ? campoLink(p.site, linkSeguro(p.site)) : vazio}</dd></div>
       <div class="det-linha"><dt>Outras redes</dt><dd>${outras || vazio}</dd></div>
+      <div class="det-linha"><dt>Retorno</dt><dd class="det-retorno">
+        ${p.retorno ? `<span class="ret-mini ${classeRetorno(p.retorno_dias)}">${ICONE_RELOGIO}${esc(rotuloRetorno(p.retorno_dias, p.retorno))}</span>` : ''}
+        ${!editavel ? (p.retorno ? `<span>${dataBr(p.retorno)}</span>` : vazio) : ''}
+        ${editavel ? `
+          <input type="date" class="ret-data" id="det-ret-data" value="${esc(p.retorno || '')}" aria-label="Ligar de novo em">
+          ${p.retorno ? '<button type="button" class="btn pequeno" id="det-ret-feito">✓ Feito</button>' : ''}` : ''}
+      </dd></div>
       <div class="det-linha"><dt>Problemas</dt><dd>${(p.problemas || []).length
         ? `<span class="chips-prob">${p.problemas.map((x) => `<span class="prob-chip">${esc(x)}</span>`).join('')}</span>` : vazio}</dd></div>
     </dl>
@@ -511,14 +522,14 @@ function abrirDetalhe(id) {
 
     <div class="por">${avatar(m, 30)}<span>Prospectado por <b>${esc(m.nome)}</b>${selo(m)} em ${dataLonga(p.criado_em)}</span></div>
 
-    ${pode ? `
+    ${editavel ? `
       <div class="dlg-rodape">
         <button type="button" class="btn fantasma perigo" id="det-excluir">Excluir</button>
         <button type="button" class="btn primario" id="det-editar">Editar</button>
       </div>` : ''}
   `;
 
-  if (pode) {
+  if (editavel) {
     $$('[name=st-rapido]', $('#detalhe')).forEach((r) => r.addEventListener('change', async () => {
       try {
         const nova = await api(`/api/prospeccoes/${p.id}`, { method: 'PUT', body: { status: r.value } });
@@ -529,13 +540,27 @@ function abrirDetalhe(id) {
       } catch (err) { toast(err.message, 'erro'); }
     }));
     $('#det-editar').onclick = () => { $('#dlg-detalhe').close(); abrirFormProsp(p); };
+    const mudarRetorno = async (corpo, msg) => {
+      try {
+        const nova = await api(`/api/prospeccoes/${p.id}`, { method: 'PUT', body: corpo });
+        Object.assign(p, nova);
+        renderLista();
+        abrirDetalhe(p.id);
+        carregarRetornos().catch(() => {});
+        toast(msg);
+      } catch (err) { toast(err.message, 'erro'); }
+    };
+    $('#det-ret-data').onchange = (e) => mudarRetorno({ retorno_em: e.target.value || null },
+      e.target.value ? `Retorno marcado para ${dataBr(e.target.value)}` : 'Retorno removido');
+    if ($('#det-ret-feito')) $('#det-ret-feito').onclick = () => mudarRetorno({ retorno_em: null, retorno_feito: true }, 'Retorno feito ✓');
     $('#det-excluir').onclick = async () => {
-      if (!confirm(`Excluir a prospecção de “${p.empresa}”? Isso não pode ser desfeito.`)) return;
+      const aviso = p.contrato_id ? '\n\nAtenção: o contrato dessa empresa também será excluído.' : '';
+      if (!confirm(`Excluir a prospecção de “${p.empresa}”? Isso não pode ser desfeito.${aviso}`)) return;
       try {
         await api(`/api/prospeccoes/${p.id}`, { method: 'DELETE' });
         $('#dlg-detalhe').close();
         toast('Prospecção excluída');
-        carregarProsp();
+        carregarProsp().catch(() => {});
       } catch (err) { toast(err.message, 'erro'); }
     };
   }
@@ -563,6 +588,7 @@ function abrirFormProsp(p = null) {
       f[c].value = p[c] || '';
     }
     f.querySelector(`[name=status][value=${p.status}]`).checked = true;
+    f.retorno_em.value = p.retorno || '';
   }
   $('#mais-info').open = Boolean(p && (p.localidade || p.instagram || p.site || p.outras_redes));
   fecharCombo();
@@ -572,6 +598,12 @@ function abrirFormProsp(p = null) {
 }
 
 $('#btn-nova').addEventListener('click', () => abrirFormProsp());
+// atalhos: Amanhã · 3 dias · 1 semana · Sem retorno
+$('#atalhos-retorno').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-d]');
+  if (!b) return;
+  $('#in-retorno').value = b.dataset.d ? somarDias(Number(b.dataset.d)) : '';
+});
 
 // ---------- campo de nicho: lista que filtra enquanto digita ----------
 const combo = { caixa: $('#combo-nicho'), input: $('#in-nicho'), lista: $('#combo-lista'), itens: [], ativo: -1 };
@@ -684,8 +716,9 @@ $('#form-prosp').addEventListener('submit', async (e) => {
       toast('Alterações salvas');
     } else {
       await api('/api/prospeccoes', { method: 'POST', body: dados });
-      toast('Prospecção registrada!');
+      toast(dados.retorno_em ? `Registrada! Retorno em ${dataBr(dados.retorno_em)}` : 'Prospecção registrada!');
     }
+    carregarRetornos().catch(() => {});
     $('#dlg-prosp').close();
     // pode ter nascido um nicho ou problema novo
     [estado.nichos, estado.problemas] = await Promise.all([api('/api/nichos'), api('/api/problemas')]);
@@ -1888,7 +1921,403 @@ function atualizarTelaAtual() {
   else if (v === 'nichos') carregarNichos().catch(pega);
   else if (v === 'equipe') carregarUsuarios().catch(pega);
   else if (v === 'prospeccoes') carregarProsp().catch(pega);
+  else if (v === 'historico') carregarHistorico().catch(pega);
+  if (v !== 'prospeccoes') carregarRetornos().catch(() => {}); // contador do menu
 }
+
+// =====================================================
+//  RETORNOS — lembrete de ligar de novo para a empresa
+// =====================================================
+const ICONE_RELOGIO = '<svg class="ico-rel" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2M9 2.5h6"/></svg>';
+const DIAS_SEM = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
+// data de hoje + n dias, no formato AAAA-MM-DD (no horário de quem está usando)
+function somarDias(n, base = hojeISO()) {
+  const [a, m, d] = base.split('-').map(Number);
+  const x = new Date(a, m - 1, d + n);
+  return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+}
+function rotuloRetorno(dias, iso) {
+  if (dias === null || dias === undefined) return '';
+  if (dias < 0) return `Atrasado ${-dias} dia${dias === -1 ? '' : 's'}`;
+  if (dias === 0) return 'Hoje';
+  if (dias === 1) return 'Amanhã';
+  const [a, m, d] = iso.split('-').map(Number);
+  return `${DIAS_SEM[new Date(a, m - 1, d).getDay()]}, ${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}`;
+}
+const classeRetorno = (dias) => (dias < 0 ? 'atrasado' : dias === 0 ? 'hoje' : 'futuro');
+
+estado.retTodos = Boolean(lerLocal('retornos-todos'));
+estado.retVerTudo = false;
+
+// atrasados, de hoje e dos próximos 7 dias. A gestão recebe os da equipe e escolhe o que ver.
+async function carregarRetornos() {
+  if (!estado.eu) return;
+  const d = await api('/api/retornos' + (veTudo() ? '?todos=1' : ''));
+  estado.ret = d.itens;
+  // o número vermelho no menu conta só os SEUS de hoje e atrasados
+  const meus = d.itens.filter((p) => p.usuario_id === estado.eu.id && p.retorno_dias <= 0).length;
+  const b = $('#nav-retornos');
+  b.hidden = !meus;
+  b.textContent = meus > 99 ? '99+' : meus;
+  b.title = `${meus} retorno${meus === 1 ? '' : 's'} para hoje ou atrasado${meus === 1 ? '' : 's'}`;
+  renderRetornos();
+}
+
+function renderRetornos() {
+  const el = $('#retornos');
+  const todos = veTudo() && estado.retTodos;
+  const tudo = estado.ret || [];
+  const lista = tudo.filter((p) => todos || p.usuario_id === estado.eu.id);
+  if (!tudo.length || (!veTudo() && !lista.length)) { el.hidden = true; el.innerHTML = ''; return; }
+  el.hidden = false;
+  const atras = lista.filter((p) => p.retorno_dias < 0).length;
+  const hoje = lista.filter((p) => p.retorno_dias === 0).length;
+  const prox = lista.length - atras - hoje;
+  const partes = [];
+  if (atras) partes.push(`<b class="t-atrasado">${atras} atrasado${atras === 1 ? '' : 's'}</b>`);
+  if (hoje) partes.push(`<b class="t-hoje">${hoje} para hoje</b>`);
+  if (prox) partes.push(`${prox} nos próximos 7 dias`);
+  const LIMITE = 5;
+  const mostrar = estado.retVerTudo ? lista : lista.slice(0, LIMITE);
+
+  el.innerHTML = `
+    <div class="ret-cab">
+      <h3>${ICONE_RELOGIO}Retornos</h3>
+      <span class="dica">${partes.join(' · ') || 'Nenhum retorno marcado para os próximos dias.'}</span>
+      ${veTudo() ? `<div class="segmentado ret-quem" role="group" aria-label="De quem">
+        <button type="button" data-todos="0" class="${todos ? '' : 'ativo'}">Meus</button>
+        <button type="button" data-todos="1" class="${todos ? 'ativo' : ''}">Da equipe</button></div>` : ''}
+    </div>
+    ${mostrar.length ? `<div class="ret-lista">${mostrar.map((p) => {
+      const zap = linkWhats(p.telefone);
+      const m = membro(p.usuario_id, p.usuario_nome);
+      const meu = podeEditar(p);
+      return `
+      <div class="ret-item ${classeRetorno(p.retorno_dias)}">
+        <span class="ret-quando">${esc(rotuloRetorno(p.retorno_dias, p.retorno))}</span>
+        <button type="button" class="ret-empresa" data-abrir="${p.id}">
+          <strong>${esc(p.empresa)}</strong>
+          <span>${[p.nicho, p.telefone].filter(Boolean).map(esc).join(' · ') || 'Sem número'}${todos ? ` · ${esc(p.usuario_id === estado.eu.id ? 'você' : primeiroNome(m.nome))}` : ''}</span>
+        </button>
+        <div class="ret-acoes">
+          ${zap ? `<a class="btn pequeno btn-zap" href="${esc(zap)}" target="_blank" rel="noopener noreferrer" title="Abrir no WhatsApp">WhatsApp</a>` : ''}
+          ${meu ? `<button type="button" class="btn pequeno" data-feito="${p.id}" title="Já liguei">✓ Feito</button>
+          <button type="button" class="btn pequeno fantasma" data-adiar="${p.id}" title="Passar para o próximo dia">Adiar</button>` : ''}
+        </div>
+      </div>`;
+    }).join('')}</div>` : `<p class="dica ret-vazio">${todos ? 'A equipe não tem retornos para os próximos dias.' : 'Você não tem retornos para os próximos dias.'}</p>`}
+    ${lista.length > LIMITE ? `<button type="button" class="btn largo fantasma" id="ret-mais">${estado.retVerTudo ? 'Mostrar menos' : `Ver todos (${lista.length})`}</button>` : ''}`;
+}
+
+$('#retornos').addEventListener('click', async (e) => {
+  const t = e.target;
+  const quem = t.closest('[data-todos]');
+  if (quem) { estado.retTodos = quem.dataset.todos === '1'; gravarLocal('retornos-todos', estado.retTodos); renderRetornos(); return; }
+  if (t.closest('#ret-mais')) { estado.retVerTudo = !estado.retVerTudo; renderRetornos(); return; }
+  const abrir = t.closest('[data-abrir]');
+  if (abrir) {
+    const id = Number(abrir.dataset.abrir);
+    // a empresa pode estar fora do filtro da lista: coloca na memória para abrir os detalhes
+    if (!estado.prosp.some((x) => x.id === id)) {
+      const r = estado.ret.find((x) => x.id === id);
+      if (r) estado.prosp.push(r);
+    }
+    abrirDetalhe(id);
+    return;
+  }
+  const feito = t.closest('[data-feito]');
+  const adiar = t.closest('[data-adiar]');
+  if (!feito && !adiar) return;
+  const p = estado.ret.find((x) => x.id === Number((feito || adiar).dataset.feito || (feito || adiar).dataset.adiar));
+  if (!p) return;
+  (feito || adiar).disabled = true;
+  try {
+    if (feito) {
+      await api(`/api/prospeccoes/${p.id}`, { method: 'PUT', body: { retorno_em: null, retorno_feito: true } });
+      toast(`Retorno de ${p.empresa} feito ✓`);
+    } else {
+      const base = p.retorno_dias > 0 ? p.retorno : hojeISO();
+      const nova = somarDias(1, base);
+      await api(`/api/prospeccoes/${p.id}`, { method: 'PUT', body: { retorno_em: nova } });
+      toast(`${p.empresa}: retorno passou para ${dataBr(nova)}`);
+    }
+    await carregarProsp();
+  } catch (err) {
+    toast(err.message, 'erro');
+    (feito || adiar).disabled = false;
+  }
+});
+
+// quem deixa o sistema aberto: ao voltar para a aba, atualiza os retornos (o dia pode ter mudado)
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && estado.eu) carregarRetornos().catch(() => {});
+});
+
+// =====================================================
+//  HISTÓRICO — quem fez o quê e quando (gestão)
+// =====================================================
+const filtroHist = criarFiltro($('#fp-hist'), 'historico', () => carregarHistorico().catch((err) => toast(err.message, 'erro')));
+const TIPO_HIST = { prospeccao: 'Prospecção', contrato: 'Contrato', equipe: 'Equipe', sistema: 'Sistema' };
+const COR_ACAO = { criou: 'ok', pagou: 'ok', retorno: 'ok', excluiu: 'ruim', restaurou: 'ruim', editou: '', regra: 'aviso', senha: '', backup: '' };
+
+async function carregarHistorico() {
+  filtroHist.desenhar();
+  const sel = $('#hist-usuario');
+  const v = sel.value;
+  sel.innerHTML = '<option value="">Todo mundo</option>'
+    + estado.equipe.map((m) => `<option value="${m.id}">${esc(m.nome)}</option>`).join('');
+  sel.value = v;
+  const p = new URLSearchParams(filtroHist.query());
+  const q = $('#hist-busca').value.trim();
+  if (q) p.set('q', q);
+  if ($('#hist-tipo').value) p.set('tipo', $('#hist-tipo').value);
+  if (sel.value) p.set('usuario', sel.value);
+  estado.hist = await api('/api/historico?' + p);
+  renderHistorico();
+}
+
+function diaHist(iso) {
+  const d = new Date(iso);
+  const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  if (k === hojeISO()) return 'Hoje';
+  if (k === somarDias(-1)) return 'Ontem';
+  return d.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+}
+
+function renderHistorico() {
+  const el = $('#hist-lista');
+  const lista = estado.hist || [];
+  if (!lista.length) {
+    el.innerHTML = '<div class="vazio"><strong>Nada no histórico</strong>Nenhuma alteração com esses filtros. O histórico começa a contar a partir desta atualização.</div>';
+    return;
+  }
+  let dia = '';
+  el.innerHTML = lista.map((h) => {
+    const d = diaHist(h.criado_em);
+    const cab = d !== dia ? `<div class="hist-dia">${esc(d.charAt(0).toUpperCase() + d.slice(1))}</div>` : '';
+    dia = d;
+    const hora = new Date(h.criado_em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    const m = h.usuario_id ? membro(h.usuario_id, h.usuario_nome) : { id: 0, nome: h.usuario_nome || 'Sistema' };
+    return `${cab}<div class="hist-item">
+      <time>${hora}</time>
+      ${avatar(m, 30)}
+      <p><b>${esc(m.nome)}</b> ${esc(h.descricao)}</p>
+      <span class="hist-tipo ${COR_ACAO[h.acao] ?? ''}">${TIPO_HIST[h.tipo] || h.tipo}</span>
+    </div>`;
+  }).join('') + (lista.length >= 1000 ? '<p class="dica hist-limite">Mostrando as 1000 alterações mais recentes. Use os filtros para ver as mais antigas.</p>' : '');
+}
+let tHist;
+$('#hist-busca').addEventListener('input', () => {
+  clearTimeout(tHist);
+  tHist = setTimeout(() => carregarHistorico().catch((err) => toast(err.message, 'erro')), 300);
+});
+['#hist-tipo', '#hist-usuario'].forEach((s) => $(s).addEventListener('change', () => carregarHistorico().catch((err) => toast(err.message, 'erro'))));
+
+// =====================================================
+//  EXPORTAR PARA EXCEL (planilha.js monta o .xlsx)
+// =====================================================
+const nomeArquivo = (base, rotulo) => `${base} - ${rotulo}`.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, ' ').slice(0, 120) + '.xlsx';
+const simNao = (b) => (b ? 'Sim' : 'Não');
+function exportar(nome, abas) {
+  try {
+    Planilha.baixar(nome, abas);
+    toast('Planilha baixada ✓');
+  } catch (err) {
+    console.error(err);
+    toast('Não consegui gerar a planilha.', 'erro');
+  }
+}
+
+// Prospecções: exatamente o que está na lista (com busca e filtros)
+$('#prosp-excel').addEventListener('click', () => {
+  const lista = estado.prosp || [];
+  if (!lista.length) { toast('Não há prospecções com esses filtros para exportar.', 'erro'); return; }
+  const gestao = veTudo();
+  const colunas = [
+    { titulo: 'Empresa', tipo: 'texto' }, { titulo: 'Nicho', tipo: 'texto' }, { titulo: 'Resultado', tipo: 'texto' },
+    { titulo: 'Número', tipo: 'texto' }, { titulo: 'Localidade', tipo: 'texto' }, { titulo: 'Instagram', tipo: 'texto' },
+    { titulo: 'Site', tipo: 'texto' }, { titulo: 'Outras redes', tipo: 'texto', largura: 28 },
+    { titulo: 'Problemas', tipo: 'texto', largura: 34 }, { titulo: 'Anotações', tipo: 'longo', largura: 50 },
+    { titulo: 'Ligar de novo em', tipo: 'data' }, { titulo: 'Prospectado por', tipo: 'texto' },
+    { titulo: 'Cadastrado em', tipo: 'datahora', largura: 17 },
+  ];
+  if (gestao) colunas.push({ titulo: 'Valor do contrato', tipo: 'moeda' });
+  const linhas = lista.map((p) => {
+    const l = [p.empresa, p.nicho, STATUS[p.status], p.telefone, p.localidade, p.instagram, p.site,
+      (p.outras_redes || '').replace(/\n+/g, ' · '), (p.problemas || []).join(', '), p.anotacoes,
+      p.retorno, membro(p.usuario_id, p.usuario_nome).nome, p.criado_em];
+    if (gestao) l.push(p.contrato_valor ?? null);
+    return l;
+  });
+  // resumo por pessoa
+  const porPessoa = new Map();
+  for (const p of lista) {
+    const nome = membro(p.usuario_id, p.usuario_nome).nome;
+    const x = porPessoa.get(nome) || { total: 0, aceitou: 0, pensando: 0, recusou: 0 };
+    x.total += 1; x[p.status] += 1;
+    porPessoa.set(nome, x);
+  }
+  const resumo = [...porPessoa.entries()].sort((a, b) => b[1].total - a[1].total)
+    .map(([nome, x]) => [nome, x.total, x.aceitou, x.pensando, x.recusou, x.total ? x.aceitou / x.total : 0]);
+  exportar(nomeArquivo('Prospecções', filtroProsp.rotulo()), [
+    { nome: 'Prospecções', colunas, linhas, total: gestao ? { [colunas.length - 1]: 'soma' } : null },
+    { nome: 'Por pessoa', colunas: [
+      { titulo: 'Pessoa', tipo: 'texto' }, { titulo: 'Total', tipo: 'numero' }, { titulo: 'Aceitaram', tipo: 'numero' },
+      { titulo: 'Pensando', tipo: 'numero' }, { titulo: 'Recusaram', tipo: 'numero' }, { titulo: 'Taxa de aceite', tipo: 'pct' }],
+    linhas: resumo, total: { 1: 'soma', 2: 'soma', 3: 'soma', 4: 'soma' } },
+  ]);
+});
+
+// Financeiro: respeita o período e a busca por funcionário
+$('#fin-excel').addEventListener('click', () => {
+  const d = estado.fin;
+  if (!d) return;
+  const q = semAcento($('#fin-busca').value);
+  const bate = (nome) => !q || semAcento(nome || '').includes(q);
+  const contratos = d.contratos.filter((c) => bate(c.usuario_nome));
+  if (!contratos.length) { toast('Não há contratos nesse período para exportar.', 'erro'); return; }
+  const MODO = { auto: 'Automática', manual: 'Definida na mão', adm: 'Sem comissão (ADM)' };
+  const porMes = new Map();
+  for (const c of contratos) {
+    const k = c.fechado_em.slice(0, 7);
+    const x = porMes.get(k) || { n: 0, vendido: 0, comissao: 0, lucro: 0 };
+    x.n += 1; x.vendido += c.valor; x.comissao += c.comissao; x.lucro += c.lucro;
+    porMes.set(k, x);
+  }
+  const moeda = (titulo) => ({ titulo, tipo: 'moeda' });
+  exportar(nomeArquivo('Financeiro', filtroFin.rotulo() + (q ? ` - ${$('#fin-busca').value.trim()}` : '')), [
+    { nome: 'Contratos', colunas: [
+      { titulo: 'Fechado em', tipo: 'data' }, { titulo: 'Empresa', tipo: 'texto' }, { titulo: 'Projeto', tipo: 'texto' },
+      { titulo: 'Nicho', tipo: 'texto' }, { titulo: 'Fechado por', tipo: 'texto' }, moeda('Valor do projeto'),
+      moeda('Comissão'), { titulo: 'Tipo de comissão', tipo: 'texto' }, moeda(rotLucro()), { titulo: 'Comissão paga', tipo: 'texto' }],
+    linhas: contratos.map((c) => [c.fechado_em, c.empresa, c.projeto, c.nicho, c.usuario_nome, c.valor, c.comissao,
+      MODO[c.modo] || c.modo, c.lucro, c.modo === 'adm' ? '—' : simNao(c.comissao_paga)]),
+    total: { 5: 'soma', 6: 'soma', 8: 'soma' } },
+    { nome: 'Por funcionário', colunas: [
+      { titulo: 'Funcionário', tipo: 'texto' }, { titulo: 'Contratos', tipo: 'numero' }, moeda('Vendeu'), moeda('Comissão'),
+      moeda('Já pago'), moeda('Falta pagar'), moeda(rotLucro()), moeda('Ticket médio')],
+    linhas: d.porFuncionario.filter((f) => bate(f.nome)).map((f) => [f.nome, f.contratos, f.vendido, f.comissao, f.pago, f.aPagar, f.lucro, f.ticket]),
+    total: { 1: 'soma', 2: 'soma', 3: 'soma', 4: 'soma', 5: 'soma', 6: 'soma' } },
+    { nome: 'Por mês', colunas: [
+      { titulo: 'Mês', tipo: 'texto' }, { titulo: 'Contratos', tipo: 'numero' }, moeda('Faturamento'), moeda('Comissões'), moeda(rotLucro())],
+    linhas: [...porMes.entries()].sort().map(([k, x]) => {
+      const [a, m] = k.split('-');
+      return [`${MESES_LONGO[Number(m) - 1]}/${a}`, x.n, centavos(x.vendido), centavos(x.comissao), centavos(x.lucro)];
+    }),
+    total: { 1: 'soma', 2: 'soma', 3: 'soma', 4: 'soma' } },
+  ]);
+});
+
+// Meus ganhos (funcionário): só a comissão dele, nunca o valor do projeto
+$('#gan-excel').addEventListener('click', () => {
+  const lista = gan.lista || [];
+  if (!lista.length) { toast('Você ainda não tem contratos nesse período.', 'erro'); return; }
+  exportar(nomeArquivo('Meus ganhos', filtroGanhos.rotulo()), [{
+    nome: 'Meus ganhos',
+    colunas: [{ titulo: 'Fechado em', tipo: 'data' }, { titulo: 'Empresa', tipo: 'texto' }, { titulo: 'Projeto', tipo: 'texto' },
+      { titulo: 'Minha comissão', tipo: 'moeda' }, { titulo: 'Situação', tipo: 'texto' }],
+    linhas: lista.map((c) => [c.fechado_em, c.empresa, c.projeto, c.comissao, c.comissao_paga ? 'Recebido' : 'A receber']),
+    total: { 3: 'soma' },
+  }]);
+});
+
+// Equipe: números do período escolhido
+$('#eq-excel').addEventListener('click', () => {
+  const lista = estado.eqDados || [];
+  if (!lista.length) return;
+  exportar(nomeArquivo('Equipe', filtroEquipe.rotulo()), [{
+    nome: 'Equipe',
+    colunas: [{ titulo: 'Posição', tipo: 'numero' }, { titulo: 'Nome', tipo: 'texto' }, { titulo: 'Login', tipo: 'texto' },
+      { titulo: 'Cargo', tipo: 'texto' }, { titulo: 'Acesso', tipo: 'texto' }, { titulo: 'Verificado', tipo: 'texto' },
+      { titulo: 'Prospecções no período', tipo: 'numero' }, { titulo: 'Aceitaram', tipo: 'numero' },
+      { titulo: 'Taxa de aceite', tipo: 'pct' }, { titulo: 'Prospecções (total geral)', tipo: 'numero' }],
+    linhas: [...lista].sort((a, b) => (a.rk?.pos ?? 999) - (b.rk?.pos ?? 999) || a.nome.localeCompare(b.nome, 'pt-BR'))
+      .map((u) => [u.papel === 'funcionario' ? u.rk?.pos ?? null : null, u.nome, u.login, NOME_CARGO[u.papel],
+        u.ativo ? 'Ativo' : 'Desativado', simNao(u.verificado), u.rk?.total ?? 0, u.rk?.aceitou ?? 0,
+        u.rk?.total ? u.rk.aceitou / u.rk.total : 0, u.prospeccoes]),
+    total: { 6: 'soma', 7: 'soma', 9: 'soma' },
+  }]);
+});
+
+// Histórico
+$('#hist-excel').addEventListener('click', () => {
+  const lista = estado.hist || [];
+  if (!lista.length) { toast('Não há nada no histórico com esses filtros.', 'erro'); return; }
+  exportar(nomeArquivo('Histórico', filtroHist.rotulo()), [{
+    nome: 'Histórico',
+    colunas: [{ titulo: 'Data e hora', tipo: 'datahora', largura: 17 }, { titulo: 'Pessoa', tipo: 'texto' },
+      { titulo: 'Tipo', tipo: 'texto' }, { titulo: 'O que fez', tipo: 'longo', largura: 90 }],
+    linhas: lista.map((h) => [h.criado_em, h.usuario_nome, TIPO_HIST[h.tipo] || h.tipo, h.descricao]),
+  }]);
+});
+
+// =====================================================
+//  BACKUP (só o ADM)
+// =====================================================
+async function carregarInfoBackup() {
+  const el = $('#backup-info');
+  if (!ehAdmin()) return;
+  try {
+    const h = await api('/api/historico?tipo=sistema&q=backup');
+    const ult = h.find((x) => x.acao === 'backup');
+    if (!ult) {
+      el.className = 'backup-info aviso';
+      el.textContent = 'Você ainda não baixou nenhum backup. Baixe um agora e repita toda semana.';
+      return;
+    }
+    const d = new Date(ult.criado_em);
+    const dias = Math.floor((Date.now() - d) / 864e5);
+    el.className = 'backup-info' + (dias >= 7 ? ' aviso' : '');
+    el.textContent = `Último backup: ${d.toLocaleDateString('pt-BR')} às ${d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
+      + (dias >= 7 ? ` (há ${dias} dias — está na hora de baixar outro)` : '');
+  } catch { el.textContent = ''; }
+}
+
+$('#btn-backup').addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  btn.disabled = true;
+  btn.textContent = 'Preparando…';
+  try {
+    const r = await fetch('/api/backup', { credentials: 'same-origin' });
+    if (!r.ok) throw new Error((await r.json().catch(() => null))?.erro || 'Não consegui gerar o backup.');
+    const blob = await r.blob();
+    const nome = (r.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/)?.[1] || 'prospecta-backup.json';
+    const url = URL.createObjectURL(blob);
+    const a = Object.assign(document.createElement('a'), { href: url, download: nome });
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    toast('Backup baixado ✓ Guarde em lugar seguro.');
+    carregarInfoBackup();
+  } catch (err) {
+    toast(err.message, 'erro');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Baixar backup';
+  }
+});
+
+$('#in-backup').addEventListener('change', async (e) => {
+  const arq = e.target.files[0];
+  e.target.value = '';
+  if (!arq) return;
+  let dados;
+  try { dados = JSON.parse(await arq.text()); } catch { toast('Esse arquivo não é um backup válido.', 'erro'); return; }
+  if (dados?.app !== 'prospecta' || !dados.tabelas) { toast('Esse arquivo não é um backup do sistema.', 'erro'); return; }
+  const t = dados.tabelas;
+  const quando = new Date(dados.gerado_em).toLocaleString('pt-BR');
+  const msg = `Restaurar o backup de ${quando}?\n\n`
+    + 'Isso APAGA tudo o que está no sistema agora e coloca no lugar o que está no arquivo:\n'
+    + `• ${t.usuarios?.length || 0} pessoas\n• ${t.prospeccoes?.length || 0} prospecções\n• ${t.contratos?.length || 0} contratos\n\n`
+    + 'Dica: antes, baixe um backup de agora, por segurança.\n\nPara confirmar, digite RESTAURAR:';
+  if ((prompt(msg) || '').trim().toUpperCase() !== 'RESTAURAR') { toast('Restauração cancelada.'); return; }
+  try {
+    await api('/api/backup/restaurar', { method: 'POST', body: dados });
+    toast('Backup restaurado ✓ Recarregando…');
+    setTimeout(() => location.reload(), 1200);
+  } catch (err) {
+    toast(err.message, 'erro');
+  }
+});
 
 // =====================================================
 //  PERFIL
@@ -1900,6 +2329,7 @@ async function renderPerfil() {
   $('#btn-remover-foto').hidden = !estado.eu.foto;
   marcarTema(temaSalvo());
   if (document.activeElement?.form !== $('#form-marca')) $('#form-marca').nome.value = estado.nomeSistema || '';
+  carregarInfoBackup();
   await renderGanhos();
 }
 

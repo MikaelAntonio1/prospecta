@@ -78,6 +78,23 @@ async function init() {
     -- comissão manual em porcentagem do valor do projeto (ex.: 15 = 15%)
     ALTER TABLE contratos ADD COLUMN IF NOT EXISTS comissao_pct NUMERIC(6,2) CHECK (comissao_pct >= 0 AND comissao_pct <= 100);
 
+    -- Lembrete de retorno: dia para ligar de novo para a empresa
+    ALTER TABLE prospeccoes ADD COLUMN IF NOT EXISTS retorno_em DATE;
+    CREATE INDEX IF NOT EXISTS prospeccoes_retorno ON prospeccoes (retorno_em) WHERE retorno_em IS NOT NULL;
+
+    -- Histórico: quem fez o quê e quando (o nome fica guardado mesmo se a pessoa for excluída)
+    CREATE TABLE IF NOT EXISTS historico (
+      id            SERIAL PRIMARY KEY,
+      usuario_id    INT REFERENCES usuarios(id) ON DELETE SET NULL,
+      usuario_nome  TEXT,
+      tipo          TEXT NOT NULL,      -- prospeccao | contrato | equipe | sistema
+      acao          TEXT NOT NULL,      -- criou | editou | excluiu | ...
+      alvo_id       INT,
+      descricao     TEXT NOT NULL,
+      criado_em     TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS historico_data ON historico (criado_em DESC);
+
     -- Configurações do sistema (ex.: regra de comissão)
     CREATE TABLE IF NOT EXISTS config (
       chave  TEXT PRIMARY KEY,
