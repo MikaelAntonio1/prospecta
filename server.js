@@ -298,6 +298,21 @@ app.get('/api/nichos', auth, wrap(async (req, res) => {
   res.json(rows);
 }));
 
+// Excluir nicho: só o ADM. As prospecções continuam, só ficam "sem nicho".
+app.delete('/api/nichos/:id', auth, soAdmin, wrap(async (req, res) => {
+  const id = Number(req.params.id);
+  const n = (await pool.query(`
+    SELECT n.nome, COUNT(p.id)::int AS total
+      FROM nichos n LEFT JOIN prospeccoes p ON p.nicho_id = n.id
+     WHERE n.id = $1 GROUP BY n.id`, [id])).rows[0];
+  if (!n) return erro(res, 404, 'Nicho não encontrado.');
+  await pool.query('UPDATE prospeccoes SET nicho_id = NULL WHERE nicho_id = $1', [id]);
+  await pool.query('DELETE FROM nichos WHERE id = $1', [id]);
+  await registrar(req, 'sistema', 'excluiu', id,
+    `excluiu o nicho “${n.nome}”${n.total ? ` (${n.total} prospecç${n.total === 1 ? 'ão ficou' : 'ões ficaram'} sem nicho)` : ''}`);
+  res.json({ ok: true, prospeccoes: n.total });
+}));
+
 // Devolve o id pelo nome; se ainda não existe, cria e já fica salvo para todos.
 // Serve para nichos e problemas ("Barbearia" e "barbearia" são o mesmo).
 async function idPorNome(tabela, nome, usuarioId) {

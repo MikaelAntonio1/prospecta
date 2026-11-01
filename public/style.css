@@ -171,7 +171,7 @@ main { max-width: 1100px; margin: 0 auto; padding: 28px 24px 80px; }
   object-fit: cover; display: inline-grid; place-items: center;
   border: 2px solid var(--superficie); box-shadow: 0 0 0 1px var(--borda);
 }
-.avatar.ini { background: var(--c); color: #fff; font-weight: 700; font-size: calc(var(--t) * .38); }
+.avatar.ini { background: var(--c); color: #fff; font-weight: 700; font-size: calc(var(--t) * .38); line-height: 1; text-align: center; letter-spacing: 0; }
 
 /* ---------- filtros e lista ---------- */
 .filtros { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 10px; margin-bottom: 16px; }
@@ -647,7 +647,7 @@ dialog { scrollbar-gutter: stable; }
 .pessoa-op .valor { margin-left: auto; font-size: 12px; color: var(--texto-3); font-variant-numeric: tabular-nums; }
 .criador-grafico { min-width: 0; display: grid; gap: 12px; }
 .cg-legenda { display: flex; flex-wrap: wrap; gap: 8px 14px; }
-.cg-legenda span { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; }
+.cg-legenda > span { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; }
 .cg-legenda i { width: 10px; height: 10px; border-radius: 3px; }
 .cg-area { min-height: 300px; overflow-x: auto; }
 .cg-area svg { display: block; }
@@ -738,6 +738,15 @@ dialog { scrollbar-gutter: stable; }
   width: 22px; height: 22px; border-radius: 6px; flex: none; display: grid; place-items: center;
   background: var(--primaria-suave); font-weight: 700;
 }
+.combo-del {
+  flex: none; width: 30px; height: 30px; margin: -4px -4px -4px 2px; border: 0; border-radius: 8px;
+  background: transparent; color: var(--texto-3); display: grid; place-items: center; cursor: pointer;
+  opacity: .55; transition: opacity .15s, background-color .15s, color .15s;
+}
+.combo-del svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.combo-op:hover .combo-del, .combo-op.ativo .combo-del { opacity: 1; }
+.combo-del:hover { background: var(--recusou-suave); color: var(--recusou); }
+@media (hover: none) { .combo-del { opacity: 1; } }
 .combo-vazio { padding: 10px; color: var(--texto-3); font-size: 13.5px; }
 
 /* ---------- toast ---------- */

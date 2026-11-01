@@ -625,7 +625,7 @@ function renderCombo() {
       semAcento(b.nome).startsWith(nq) - semAcento(a.nome).startsWith(nq) || a.nome.localeCompare(b.nome, 'pt-BR'));
   const existe = estado.nichos.some((n) => semAcento(n.nome) === nq);
 
-  combo.itens = achados.map((n) => ({ tipo: 'nicho', nome: n.nome, total: n.total }));
+  combo.itens = achados.map((n) => ({ tipo: 'nicho', id: n.id, nome: n.nome, total: n.total }));
   if (q && !existe) combo.itens.push({ tipo: 'novo', nome: q });
   if (combo.ativo >= combo.itens.length) combo.ativo = combo.itens.length - 1;
 
@@ -635,7 +635,8 @@ function renderCombo() {
   }
   combo.lista.innerHTML = combo.itens.map((it, i) => it.tipo === 'novo'
     ? `<li role="option" data-i="${i}" class="combo-op novo ${i === combo.ativo ? 'ativo' : ''}"><span class="mais">+</span><span>Criar nicho “${esc(it.nome)}”</span></li>`
-    : `<li role="option" data-i="${i}" class="combo-op ${i === combo.ativo ? 'ativo' : ''}"><span>${destacar(it.nome, q)}</span><span class="combo-qtd">${it.total}</span></li>`
+    : `<li role="option" data-i="${i}" class="combo-op ${i === combo.ativo ? 'ativo' : ''}"><span>${destacar(it.nome, q)}</span><span class="combo-qtd">${it.total}</span>${ehAdmin()
+      ? `<button type="button" class="combo-del" data-del="${i}" title="Excluir o nicho “${esc(it.nome)}”" aria-label="Excluir o nicho ${esc(it.nome)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg></button>` : ''}</li>`
   ).join('');
   combo.lista.querySelector('.ativo')?.scrollIntoView({ block: 'nearest' });
 }
@@ -694,9 +695,32 @@ $('#dlg-prosp').addEventListener('cancel', (e) => {
 });
 combo.lista.addEventListener('mousedown', (e) => {
   e.preventDefault(); // mantém o foco no campo
+  const del = e.target.closest('[data-del]');
+  if (del) { excluirNicho(combo.itens[Number(del.dataset.del)]); return; }
   const li = e.target.closest('[data-i]');
   if (li) escolherCombo(Number(li.dataset.i));
 });
+
+// só o ADM: apaga o nicho; as prospecções dele continuam, apenas ficam "sem nicho"
+async function excluirNicho(it) {
+  if (!it || !ehAdmin()) return;
+  const aviso = it.total
+    ? `\n\n${it.total} prospecç${it.total === 1 ? 'ão vai ficar' : 'ões vão ficar'} sem nicho (elas não são apagadas).`
+    : '';
+  if (!confirm(`Excluir o nicho “${it.nome}”?${aviso}`)) { combo.input.focus(); return; }
+  try {
+    await api(`/api/nichos/${it.id}`, { method: 'DELETE' });
+    if (semAcento(combo.input.value) === semAcento(it.nome)) combo.input.value = '';
+    if ($('#f-nicho').value === String(it.id)) $('#f-nicho').value = '';
+    estado.nichos = await api('/api/nichos');
+    preencherFiltros();
+    toast(`Nicho “${it.nome}” excluído`);
+    combo.ativo = -1;
+    renderCombo();
+    combo.input.focus();
+    carregarProsp().catch(() => {});
+  } catch (err) { toast(err.message, 'erro'); }
+}
 $('.combo-seta').addEventListener('mousedown', (e) => {
   e.preventDefault();
   if (combo.lista.hidden) { combo.input.focus(); abrirCombo(); } else fecharCombo();
