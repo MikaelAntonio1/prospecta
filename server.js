@@ -3,7 +3,6 @@ const express = require('express');
 const path = require('path');
 const cookieParser = require('cookie-parser');
 const bcrypt = require('bcryptjs');
-const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const { pool, init } = require('./db');
 
@@ -220,19 +219,6 @@ app.get('/api/usuarios', auth, soGestao, wrap(async (req, res) => {
   })));
 }));
 
-// ADM gera uma senha provisória (a senha antiga não dá para ver: o sistema só guarda ela criptografada)
-const LETRAS_SENHA = 'abcdefghjkmnpqrstuvwxyz23456789';
-app.post('/api/usuarios/:id/senha-provisoria', auth, soAdmin, wrap(async (req, res) => {
-  const id = Number(req.params.id);
-  const { rows } = await pool.query('SELECT id, nome FROM usuarios WHERE id = $1', [id]);
-  if (!rows[0]) return erro(res, 404, 'Usuário não encontrado.');
-  if (id === req.user.id) return erro(res, 400, 'Para a sua própria senha, use “Minha conta”.');
-  const bytes = crypto.randomBytes(8);
-  const senha = Array.from(bytes, (b) => LETRAS_SENHA[b % LETRAS_SENHA.length]).join('');
-  await pool.query('UPDATE usuarios SET senha_hash = $1, trocar_senha = TRUE WHERE id = $2', [await bcrypt.hash(senha, 10), id]);
-  await registrar(req, 'equipe', 'senha', id, `gerou uma senha provisória para ${rows[0].nome}`);
-  res.json({ senha });
-}));
 
 app.post('/api/usuarios', auth, precisa('equipe', 'Você não tem permissão para criar logins.'), wrap(async (req, res) => {
   const ehAdmin = req.user.papel === 'admin';

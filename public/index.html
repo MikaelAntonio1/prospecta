@@ -579,37 +579,11 @@
     </form>
   </dialog>
 
-  <!-- ===== DIÁLOGO: senha provisória (só ADM) ===== -->
-  <dialog id="dlg-senha-prov">
-    <div class="dlg-corpo">
-      <div class="dlg-cab">
-        <h3 id="sp-titulo">Senha</h3>
-        <button type="button" class="fechar" data-fechar aria-label="Fechar">×</button>
-      </div>
-      <p class="dica">Por segurança, o sistema guarda as senhas <b>criptografadas</b>: ninguém consegue ver a senha que a pessoa criou — nem você, nem quem invadir o banco. Se ela esqueceu, gere uma senha nova. No próximo acesso ela vai ser obrigada a criar a dela.</p>
-      <div id="sp-resultado" hidden>
-        <label>Senha provisória
-          <span class="campo-senha">
-            <input id="sp-senha" type="password" readonly>
-            <button type="button" class="olho" data-olho="sp-senha" aria-label="Mostrar senha"></button>
-            <button type="button" class="btn pequeno" id="sp-copiar">Copiar</button>
-          </span>
-        </label>
-        <p class="dica">Passe essa senha para <b id="sp-nome"></b> no privado. Ela só aparece agora.</p>
-      </div>
-      <p class="msg-erro" id="sp-erro"></p>
-      <div class="dlg-rodape">
-        <button type="button" class="btn fantasma" data-fechar>Fechar</button>
-        <button type="button" class="btn primario" id="sp-gerar">Gerar nova senha</button>
-      </div>
-    </div>
-  </dialog>
-
   <!-- ===== DIÁLOGO: trocar senha provisória (obrigatório) ===== -->
   <dialog id="dlg-trocar">
     <form id="form-trocar" class="dlg-corpo">
       <div class="dlg-cab"><h3>Crie a sua senha</h3></div>
-      <p class="dica">Você entrou com uma senha provisória. Crie uma senha só sua para continuar — nem o administrador vai conseguir ver.</p>
+      <p class="dica">Sua senha foi definida pelo administrador. Crie uma senha só sua para continuar — nem o administrador vai conseguir ver.</p>
       <label>Nova senha
         <span class="campo-senha">
           <input name="nova" id="tr-nova" type="password" minlength="6" maxlength="100" autocomplete="new-password" required>

@@ -1206,7 +1206,6 @@ function renderUsuarios() {
       <span class="num-eq"><strong>${r ? r.aceitou : 0}</strong><span>aceitaram</span></span>
       <span class="num-eq"><strong>${tx}%</strong><span>taxa</span></span>
       <div class="acoes">
-        ${ehAdmin() && u.id !== estado.eu.id ? `<button class="btn pequeno fantasma btn-olho" data-senha="${u.id}" title="Senha de ${esc(primeiroNome(u.nome))}" aria-label="Senha de ${esc(u.nome)}">${ICONE_OLHO}</button>` : ''}
         ${podeMexerEm(u) ? `<button class="btn pequeno" data-editar="${u.id}">Editar</button>
         ${u.id !== estado.eu.id ? `<button class="btn pequeno fantasma perigo" data-excluir="${u.id}">Excluir</button>` : ''}` : ''}
       </div>
@@ -1240,9 +1239,7 @@ $('#lista-usuarios').addEventListener('keydown', (e) => {
 $('#lista-usuarios').addEventListener('click', async (e) => {
   const ed = e.target.closest('[data-editar]');
   const ex = e.target.closest('[data-excluir]');
-  const sp = e.target.closest('[data-senha]');
   const linha = e.target.closest('[data-uid]');
-  if (sp) { abrirSenhaProv(usuarios.find((u) => u.id === Number(sp.dataset.senha))); return; }
   if (!ed && !ex && linha) { abrirFuncionario(Number(linha.dataset.uid), filtroEquipe); return; }
   if (ed) abrirFormUsuario(usuarios.find((u) => u.id === Number(ed.dataset.editar)));
   if (ex) {
@@ -2671,40 +2668,7 @@ document.addEventListener('click', (e) => {
   b.setAttribute('aria-label', mostrar ? 'Esconder senha' : 'Mostrar senha');
 });
 
-let senhaProvDe = null;
-function abrirSenhaProv(u) {
-  senhaProvDe = u;
-  $('#sp-titulo').textContent = `Senha de ${u.nome}`;
-  $('#sp-resultado').hidden = true;
-  $('#sp-erro').textContent = '';
-  $('#sp-senha').type = 'password';
-  $('[data-olho="sp-senha"]').innerHTML = ICONE_OLHO;
-  $('#sp-gerar').hidden = false;
-  $('#sp-gerar').textContent = u.trocar_senha ? 'Gerar outra senha' : 'Gerar nova senha';
-  $('#dlg-senha-prov').showModal();
-}
-$('#sp-gerar').addEventListener('click', async () => {
-  const u = senhaProvDe;
-  if (!confirm(`Gerar uma senha nova para ${u.nome}?\n\nA senha atual dele(a) para de funcionar na hora.`)) return;
-  const btn = $('#sp-gerar');
-  btn.disabled = true;
-  try {
-    const { senha } = await api(`/api/usuarios/${u.id}/senha-provisoria`, { method: 'POST' });
-    $('#sp-senha').value = senha;
-    $('#sp-nome').textContent = primeiroNome(u.nome);
-    $('#sp-resultado').hidden = false;
-    btn.hidden = true;
-    u.trocar_senha = true;
-    toast('Senha provisória criada');
-  } catch (err) { $('#sp-erro').textContent = err.message; } finally { btn.disabled = false; }
-});
-$('#sp-copiar').addEventListener('click', async () => {
-  const v = $('#sp-senha').value;
-  try { await navigator.clipboard.writeText(v); toast('Senha copiada'); }
-  catch { $('#sp-senha').type = 'text'; $('#sp-senha').select(); toast('Selecionei a senha: é só copiar'); }
-});
-
-// troca obrigatória depois de uma senha provisória
+// troca obrigatória depois que o ADM ou gerente define a senha de alguém
 function pedirTrocaSenha() {
   const f = $('#form-trocar');
   f.reset();
