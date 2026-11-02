@@ -22,7 +22,7 @@ async function api(url, { method = 'GET', body } = {}) {
   if (r.status === 401 && url !== '/api/login') {
     mostrarLogin();
   }
-  if (!r.ok) throw Object.assign(new Error(dados?.erro || 'Algo deu errado.'), { status: r.status });
+  if (!r.ok) throw Object.assign(new Error(dados?.erro || 'Algo deu errado.'), { status: r.status, dados });
   return dados;
 }
 
@@ -299,6 +299,7 @@ async function entrarApp() {
   await carregarBase();
   rotear();
   carregarRetornos().catch(() => {});
+  if (estado.eu.trocar_senha) pedirTrocaSenha();
 }
 
 // mostra/esconde o que depende do cargo e das permissões
@@ -388,7 +389,7 @@ window.addEventListener('hashchange', rotear);
 // Fechar diálogos: botão "×", "Cancelar" ou clique fora
 $$('dialog').forEach((d) => {
   d.addEventListener('click', (e) => {
-    if (e.target === d || e.target.closest('[data-fechar]')) d.close();
+    if ((e.target === d && d.id !== 'dlg-trocar') || e.target.closest('[data-fechar]')) d.close();
   });
 });
 
@@ -582,6 +583,7 @@ function abrirFormProsp(p = null) {
   const f = $('#form-prosp');
   f.reset();
   $('#prosp-erro').textContent = '';
+  mostrarRepetidas([]);
   $('#dlg-prosp-titulo').textContent = p ? 'Editar prospecção' : 'Nova prospecção';
   if (p) {
     for (const c of ['empresa', 'nicho', 'telefone', 'localidade', 'instagram', 'site', 'outras_redes', 'anotacoes']) {
@@ -739,6 +741,7 @@ $('#form-prosp').addEventListener('submit', async (e) => {
       await api(`/api/prospeccoes/${editandoProsp.id}`, { method: 'PUT', body: dados });
       toast('Alterações salvas');
     } else {
+      if (repetidasVistas) dados.confirmar_repetida = true; // a pessoa viu o aviso e quis cadastrar mesmo assim
       await api('/api/prospeccoes', { method: 'POST', body: dados });
       toast(dados.retorno_em ? `Registrada! Retorno em ${dataBr(dados.retorno_em)}` : 'Prospecção registrada!');
     }
@@ -749,11 +752,46 @@ $('#form-prosp').addEventListener('submit', async (e) => {
     preencherFiltros();
     atualizarTelaAtual();
   } catch (err) {
+    if (err.status === 409 && err.dados?.repetidas) { mostrarRepetidas(err.dados.repetidas); return; }
     $('#prosp-erro').textContent = err.message;
   } finally {
     btn.disabled = false;
   }
 });
+
+// ---------- aviso de empresa já cadastrada (mesmo nome ou mesmo número) ----------
+let repetidasVistas = false;
+function mostrarRepetidas(lista) {
+  const box = $('#prosp-rep');
+  const btn = $('#form-prosp .btn.primario');
+  const novo = !editandoProsp;
+  repetidasVistas = novo && lista.length > 0;
+  btn.textContent = repetidasVistas ? 'Cadastrar mesmo assim' : 'Salvar';
+  btn.classList.toggle('aviso', repetidasVistas);
+  box.hidden = !lista.length;
+  if (!lista.length) { box.innerHTML = ''; return; }
+  const porque = (r) => [r.mesmo_nome && 'mesmo nome', r.mesmo_fone && 'mesmo número'].filter(Boolean).join(' e ');
+  box.innerHTML = `
+    <strong>⚠️ ${lista.length === 1 ? 'Essa empresa já foi cadastrada' : `Já existem ${lista.length} cadastros parecidos`}</strong>
+    <ul>${lista.map((r) => `<li><b>${esc(r.empresa)}</b>${r.telefone ? ` · ${esc(r.telefone)}` : ''}
+      <span>${porque(r)} — por ${esc(primeiroNome(r.usuario_nome || 'alguém'))} em ${new Date(r.criado_em).toLocaleDateString('pt-BR')} · ${STATUS[r.status] || r.status}</span></li>`).join('')}</ul>
+    ${novo ? '<small>Se for outra unidade ou você quiser registrar de novo, clique em <b>Cadastrar mesmo assim</b>.</small>' : '<small>Confira se não é a mesma empresa antes de salvar.</small>'}`;
+}
+let tRep = 0;
+function checarRepetidas() {
+  clearTimeout(tRep);
+  tRep = setTimeout(async () => {
+    const f = $('#form-prosp');
+    const empresa = f.empresa.value.trim();
+    const telefone = f.telefone.value.trim();
+    if (empresa.length < 2 && telefone.replace(/\D/g, '').length < 8) { mostrarRepetidas([]); return; }
+    const qs = new URLSearchParams({ empresa, telefone });
+    if (editandoProsp) qs.set('ignorar', editandoProsp.id);
+    try { mostrarRepetidas(await api(`/api/prospeccoes/repetidas?${qs}`)); } catch { /* sem aviso */ }
+  }, 450);
+}
+$('#form-prosp').empresa.addEventListener('input', checarRepetidas);
+$('#form-prosp').telefone.addEventListener('input', checarRepetidas);
 
 // ---------- campo "Problemas da empresa": várias etiquetas ----------
 const tagsProb = (() => {
@@ -1135,6 +1173,8 @@ function renderUsuarios() {
   const ordem = $('#eq-ordem').value;
   let lista = [...(estado.eqDados || [])];
   if (q) lista = lista.filter((u) => semAcento(`${u.nome} ${u.login}`).includes(q));
+  const fOn = ehAdmin() ? $('#eq-online').value : '';
+  if (fOn) lista = lista.filter((u) => (fOn === 'on' ? u.online : !u.online));
   const taxa = (u) => (u.rk && u.rk.total ? u.rk.aceitou / u.rk.total : -1);
   const pos = (u) => (u.papel === 'funcionario' ? u.rk?.pos ?? 9999 : 9999);
   if (ordem === 'nome') lista.sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
@@ -1152,7 +1192,7 @@ function renderUsuarios() {
       ${u.papel === 'funcionario'
         ? `<span class="pos-eq ${r?.pos ? medalha(r.pos) : ''}" title="Posição no ranking (${esc(filtroEquipe.rotulo())})">${r?.pos ? `${r.pos}º` : '—'}</span>`
         : `<span class="pos-eq cargo-ico ${u.papel}" title="${NOME_CARGO[u.papel]} — fora do ranking">${u.papel === 'admin' ? '★' : '◆'}</span>`}
-      ${avatar(u, 42)}
+      ${ehAdmin() ? `<span class="av-status">${avatar(u, 42)}<i class="ponto ${u.online ? 'on' : ''}" title="${u.online ? 'Online agora' : 'Offline'}"></i></span>` : avatar(u, 42)}
       <div class="info">
         <strong>${esc(u.nome)}${selo(u)}
           ${u.papel === 'admin' ? '<span class="selo admin">ADM</span>' : ''}
@@ -1160,11 +1200,13 @@ function renderUsuarios() {
           ${u.ativo ? '' : '<span class="selo off">Desativado</span>'}
         </strong>
         <span>login: ${esc(u.login)} · ${u.prospeccoes} no total</span>
+        ${ehAdmin() ? `<span class="status-on ${u.online ? 'on' : ''}">${textoVisto(u)}</span>` : ''}
       </div>
       <span class="num-eq principal"><strong>${r ? r.total : 0}</strong><span>prospecções</span></span>
       <span class="num-eq"><strong>${r ? r.aceitou : 0}</strong><span>aceitaram</span></span>
       <span class="num-eq"><strong>${tx}%</strong><span>taxa</span></span>
       <div class="acoes">
+        ${ehAdmin() && u.id !== estado.eu.id ? `<button class="btn pequeno fantasma btn-olho" data-senha="${u.id}" title="Senha de ${esc(primeiroNome(u.nome))}" aria-label="Senha de ${esc(u.nome)}">${ICONE_OLHO}</button>` : ''}
         ${podeMexerEm(u) ? `<button class="btn pequeno" data-editar="${u.id}">Editar</button>
         ${u.id !== estado.eu.id ? `<button class="btn pequeno fantasma perigo" data-excluir="${u.id}">Excluir</button>` : ''}` : ''}
       </div>
@@ -1177,6 +1219,19 @@ const PERM_NOMES = { contratos: 'contratos', regra: 'regra de comissão', equipe
 const listaPerms = (p) => Object.keys(PERM_NOMES).filter((k) => p?.[k]).map((k) => PERM_NOMES[k]).join(', ') || 'nada (só vê)';
 
 $('#eq-busca').addEventListener('input', renderUsuarios);
+$('#eq-online').addEventListener('change', renderUsuarios);
+
+// "Online agora" / "Visto há 5 min" (só o ADM vê)
+function textoVisto(u) {
+  if (u.online) return 'Online agora';
+  if (!u.visto_em) return 'Offline · ainda não entrou';
+  const min = Math.max(1, Math.round((Date.now() - new Date(u.visto_em)) / 60e3));
+  if (min < 60) return `Offline · visto há ${min} min`;
+  const h = Math.round(min / 60);
+  if (h < 24) return `Offline · visto há ${h} h`;
+  const d = Math.round(h / 24);
+  return d === 1 ? 'Offline · visto ontem' : `Offline · visto há ${d} dias`;
+}
 $('#eq-ordem').addEventListener('change', renderUsuarios);
 $('#lista-usuarios').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && e.target.matches('[data-uid]')) abrirFuncionario(Number(e.target.dataset.uid), filtroEquipe);
@@ -1185,7 +1240,9 @@ $('#lista-usuarios').addEventListener('keydown', (e) => {
 $('#lista-usuarios').addEventListener('click', async (e) => {
   const ed = e.target.closest('[data-editar]');
   const ex = e.target.closest('[data-excluir]');
+  const sp = e.target.closest('[data-senha]');
   const linha = e.target.closest('[data-uid]');
+  if (sp) { abrirSenhaProv(usuarios.find((u) => u.id === Number(sp.dataset.senha))); return; }
   if (!ed && !ex && linha) { abrirFuncionario(Number(linha.dataset.uid), filtroEquipe); return; }
   if (ed) abrirFormUsuario(usuarios.find((u) => u.id === Number(ed.dataset.editar)));
   if (ex) {
@@ -1626,10 +1683,16 @@ function renderCriador() {
   const todos = [...estado.equipe].sort((a, b) => (pessoas.get(b.id)?.total || 0) - (pessoas.get(a.id)?.total || 0) || a.nome.localeCompare(b.nome));
   const marcados = cg.ids === null ? todos.map((m) => m.id) : cg.ids;
   $('#cg-pessoas').innerHTML = todos.map((m) => `
-    <label class="pessoa-op"><input type="checkbox" value="${m.id}" ${marcados.includes(m.id) ? 'checked' : ''}>
+    <label class="pessoa-op" data-busca="${esc(semAcento(m.nome))}"><input type="checkbox" value="${m.id}" ${marcados.includes(m.id) ? 'checked' : ''}>
       <i class="cor" style="background:${corPessoa(m.id)}"></i>${avatar(m, 26)}
       <span>${esc(primeiroNome(m.nome))}${m.id === estado.eu.id ? ' (você)' : ''}</span>
       <span class="valor">${pessoas.get(m.id) ? M.curto(pessoas.get(m.id).total) : '—'}</span></label>`).join('');
+  filtrarPessoasCg();
+  const nMarc = todos.filter((m) => marcados.includes(m.id)).length;
+  const chkTodos = $('#cg-todos');
+  chkTodos.checked = todos.length > 0 && nMarc === todos.length;
+  chkTodos.indeterminate = nMarc > 0 && nMarc < todos.length;
+  $('#cg-cont').textContent = `${nMarc} de ${todos.length}`;
 
   const sel = todos.filter((m) => marcados.includes(m.id))
     .map((m) => ({ ...m, total: pessoas.get(m.id)?.total || 0, mes: pessoas.get(m.id)?.mes || {}, cor: corPessoa(m.id) }));
@@ -1757,8 +1820,30 @@ $('#cg-pessoas').addEventListener('change', () => {
   cg.ids = $$('#cg-pessoas input:checked').map((i) => Number(i.value));
   salvarCriador();
 });
-$('#cg-todos').addEventListener('click', () => { cg.ids = null; salvarCriador(); });
-$('#cg-nenhum').addEventListener('click', () => { cg.ids = []; salvarCriador(); });
+// "Selecionar todos": com busca digitada, marca/desmarca só quem aparece na busca
+$('#cg-todos').addEventListener('change', (e) => {
+  const visiveis = $$('#cg-pessoas .pessoa-op:not([hidden]) input').map((i) => Number(i.value));
+  const atuais = new Set($$('#cg-pessoas input:checked').map((i) => Number(i.value)));
+  const total = $$('#cg-pessoas input').length;
+  if (e.target.checked) visiveis.forEach((id) => atuais.add(id));
+  else visiveis.forEach((id) => atuais.delete(id));
+  cg.ids = atuais.size === total ? null : [...atuais];
+  salvarCriador();
+});
+function filtrarPessoasCg() {
+  const q = semAcento($('#cg-busca').value.trim());
+  let n = 0;
+  $$('#cg-pessoas .pessoa-op').forEach((l) => {
+    l.hidden = Boolean(q) && !l.dataset.busca.includes(q);
+    if (!l.hidden) n += 1;
+  });
+  let vazio = $('#cg-pessoas .cg-sem');
+  if (!n && q) {
+    if (!vazio) $('#cg-pessoas').insertAdjacentHTML('beforeend', '<p class="cg-sem">Ninguém com esse nome.</p>');
+  } else if (vazio) vazio.remove();
+  $('#cg-todos').closest('label').querySelector('span').textContent = q ? 'Selecionar os encontrados' : 'Selecionar todos';
+}
+$('#cg-busca').addEventListener('input', filtrarPessoasCg);
 // redesenha quando a largura muda (girar o celular, abrir menu)
 let larguraCg = 0;
 new ResizeObserver(() => {
@@ -2569,6 +2654,87 @@ $('#btn-sair').addEventListener('click', async () => {
   location.hash = '';
   mostrarLogin();
 });
+
+// =====================================================
+//  SENHAS — olho para mostrar, senha provisória (ADM) e troca obrigatória
+// =====================================================
+const ICONE_OLHO = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+const ICONE_OLHO_X = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l18 18"/><path d="M10.6 5.1A10.4 10.4 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.2 4.1M6.6 6.6C3.8 8.4 2 12 2 12s3.6 7 10 7c1.7 0 3.2-.5 4.5-1.2"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>';
+$$('[data-olho]').forEach((b) => (b.innerHTML = ICONE_OLHO));
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-olho]');
+  if (!b) return;
+  const inp = document.getElementById(b.dataset.olho);
+  const mostrar = inp.type === 'password';
+  inp.type = mostrar ? 'text' : 'password';
+  b.innerHTML = mostrar ? ICONE_OLHO_X : ICONE_OLHO;
+  b.setAttribute('aria-label', mostrar ? 'Esconder senha' : 'Mostrar senha');
+});
+
+let senhaProvDe = null;
+function abrirSenhaProv(u) {
+  senhaProvDe = u;
+  $('#sp-titulo').textContent = `Senha de ${u.nome}`;
+  $('#sp-resultado').hidden = true;
+  $('#sp-erro').textContent = '';
+  $('#sp-senha').type = 'password';
+  $('[data-olho="sp-senha"]').innerHTML = ICONE_OLHO;
+  $('#sp-gerar').hidden = false;
+  $('#sp-gerar').textContent = u.trocar_senha ? 'Gerar outra senha' : 'Gerar nova senha';
+  $('#dlg-senha-prov').showModal();
+}
+$('#sp-gerar').addEventListener('click', async () => {
+  const u = senhaProvDe;
+  if (!confirm(`Gerar uma senha nova para ${u.nome}?\n\nA senha atual dele(a) para de funcionar na hora.`)) return;
+  const btn = $('#sp-gerar');
+  btn.disabled = true;
+  try {
+    const { senha } = await api(`/api/usuarios/${u.id}/senha-provisoria`, { method: 'POST' });
+    $('#sp-senha').value = senha;
+    $('#sp-nome').textContent = primeiroNome(u.nome);
+    $('#sp-resultado').hidden = false;
+    btn.hidden = true;
+    u.trocar_senha = true;
+    toast('Senha provisória criada');
+  } catch (err) { $('#sp-erro').textContent = err.message; } finally { btn.disabled = false; }
+});
+$('#sp-copiar').addEventListener('click', async () => {
+  const v = $('#sp-senha').value;
+  try { await navigator.clipboard.writeText(v); toast('Senha copiada'); }
+  catch { $('#sp-senha').type = 'text'; $('#sp-senha').select(); toast('Selecionei a senha: é só copiar'); }
+});
+
+// troca obrigatória depois de uma senha provisória
+function pedirTrocaSenha() {
+  const f = $('#form-trocar');
+  f.reset();
+  $('#tr-erro').textContent = '';
+  $('#dlg-trocar').showModal();
+  setTimeout(() => f.nova.focus(), 50);
+}
+$('#dlg-trocar').addEventListener('cancel', (e) => e.preventDefault()); // Esc não fecha
+$('#form-trocar').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  if (f.nova.value !== f.repetir.value) { $('#tr-erro').textContent = 'As duas senhas não estão iguais.'; return; }
+  const btn = f.querySelector('.btn.primario');
+  btn.disabled = true;
+  try {
+    await api('/api/me/senha', { method: 'PUT', body: { nova: f.nova.value } });
+    estado.eu.trocar_senha = false;
+    $('#dlg-trocar').close();
+    toast('Pronto! Sua senha foi criada');
+  } catch (err) { $('#tr-erro').textContent = err.message; } finally { btn.disabled = false; }
+});
+$('#tr-sair').addEventListener('click', () => { $('#dlg-trocar').close(); $('#btn-sair').click(); });
+
+// sinal de "online" a cada minuto enquanto o sistema está aberto na tela
+setInterval(() => {
+  if (!estado.eu || document.visibilityState !== 'visible') return;
+  api('/api/ping', { method: 'POST' }).catch(() => {});
+  // o ADM na tela da equipe vê o online/offline se atualizar sozinho
+  if (ehAdmin() && location.hash === '#equipe' && !document.querySelector('dialog[open]')) carregarUsuarios().catch(() => {});
+}, 60e3);
 
 // =====================================================
 //  INÍCIO

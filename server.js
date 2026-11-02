@@ -3,6 +3,7 @@ const express = require('express');
 const path = require('path');
 const cookieParser = require('cookie-parser');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const { pool, init } = require('./db');
 
@@ -58,6 +59,7 @@ const limparPermissoes = (p) => Object.fromEntries(PERMISSOES.map((k) => [k, Boo
 const publico = (u) => ({
   id: u.id, nome: u.nome, login: u.login, papel: u.papel, foto: u.foto,
   verificado: Boolean(u.verificado), permissoes: limparPermissoes(u.permissoes),
+  trocar_senha: Boolean(u.trocar_senha),
 });
 const veTudo = (u) => u.papel === 'admin' || u.papel === 'gerente';
 const pode = (u, perm) => u.papel === 'admin' || (u.papel === 'gerente' && Boolean(u.permissoes?.[perm]));
@@ -70,7 +72,7 @@ const auth = wrap(async (req, res, next) => {
     return erro(res, 401, 'Faça login para continuar.');
   }
   const { rows } = await pool.query(
-    'SELECT id, nome, login, papel, foto, ativo, verificado, permissoes FROM usuarios WHERE id = $1',
+    'SELECT id, nome, login, papel, foto, ativo, verificado, permissoes, trocar_senha FROM usuarios WHERE id = $1',
     [payload.id]
   );
   const u = rows[0];
@@ -79,8 +81,18 @@ const auth = wrap(async (req, res, next) => {
     return erro(res, 401, 'Seu acesso foi desativado.');
   }
   req.user = u;
+  marcarVisto(u.id);
   next();
 });
+
+// online/offline: guarda quando a pessoa usou o sistema pela última vez (no máximo 1 gravação por minuto)
+const ultimoVisto = new Map();
+function marcarVisto(id) {
+  const agora = Date.now();
+  if (agora - (ultimoVisto.get(id) || 0) < 60e3) return;
+  ultimoVisto.set(id, agora);
+  pool.query('UPDATE usuarios SET visto_em = now() WHERE id = $1', [id]).catch(() => {});
+}
 
 // só o dono
 const soAdmin = (req, res, next) =>
@@ -137,10 +149,18 @@ app.put('/api/marca', auth, soAdmin, wrap(async (req, res) => {
   res.json({ nome });
 }));
 
-app.post('/api/logout', (req, res) => {
+app.post('/api/logout', wrap(async (req, res) => {
+  try {
+    const { id } = jwt.verify(req.cookies.token || '', SECRET);
+    ultimoVisto.delete(id);
+    await pool.query(`UPDATE usuarios SET visto_em = now() - interval '5 minutes' WHERE id = $1`, [id]);
+  } catch { /* já estava sem login */ }
   res.clearCookie('token');
   res.json({ ok: true });
-});
+}));
+
+// sinal de vida enquanto o sistema está aberto (para o "online" do ADM)
+app.post('/api/ping', auth, (req, res) => res.json({ ok: true }));
 
 // ---------- meu perfil ----------
 app.get('/api/me', auth, (req, res) => res.json(publico(req.user)));
@@ -159,8 +179,12 @@ app.put('/api/me/senha', auth, wrap(async (req, res) => {
   const { atual, nova } = req.body;
   if (typeof nova !== 'string' || nova.length < 6) return erro(res, 400, 'A nova senha precisa ter pelo menos 6 caracteres.');
   const { rows } = await pool.query('SELECT senha_hash FROM usuarios WHERE id = $1', [req.user.id]);
-  if (!(await bcrypt.compare(String(atual || ''), rows[0].senha_hash))) return erro(res, 400, 'Senha atual incorreta.');
-  await pool.query('UPDATE usuarios SET senha_hash = $1 WHERE id = $2', [await bcrypt.hash(nova, 10), req.user.id]);
+  // com senha provisória a pessoa acabou de entrar com ela, então não precisa digitar de novo
+  if (!req.user.trocar_senha && !(await bcrypt.compare(String(atual || ''), rows[0].senha_hash))) {
+    return erro(res, 400, 'Senha atual incorreta.');
+  }
+  if (await bcrypt.compare(nova, rows[0].senha_hash)) return erro(res, 400, 'Escolha uma senha diferente da atual.');
+  await pool.query('UPDATE usuarios SET senha_hash = $1, trocar_senha = FALSE WHERE id = $2', [await bcrypt.hash(nova, 10), req.user.id]);
   await registrar(req, 'equipe', 'senha', req.user.id, 'trocou a própria senha');
   res.json({ ok: true });
 }));
@@ -182,12 +206,32 @@ const CAMPOS_U = 'id, nome, login, papel, foto, ativo, verificado, permissoes';
 app.get('/api/usuarios', auth, soGestao, wrap(async (req, res) => {
   const { rows } = await pool.query(`
     SELECT u.id, u.nome, u.login, u.papel, u.foto, u.ativo, u.verificado, u.permissoes, u.criado_em,
-           COUNT(p.id)::int AS prospeccoes
+           u.visto_em, u.trocar_senha, COUNT(p.id)::int AS prospeccoes
       FROM usuarios u
       LEFT JOIN prospeccoes p ON p.usuario_id = u.id
      GROUP BY u.id
      ORDER BY u.ativo DESC, u.papel, u.nome`);
-  res.json(rows.map((u) => ({ ...u, permissoes: limparPermissoes(u.permissoes) })));
+  const adm = req.user.papel === 'admin';
+  res.json(rows.map(({ visto_em, trocar_senha, ...u }) => ({
+    ...u,
+    permissoes: limparPermissoes(u.permissoes),
+    // online/offline e senha provisória: só o ADM vê
+    ...(adm ? { visto_em, trocar_senha, online: Boolean(visto_em && Date.now() - new Date(visto_em) < 2.5 * 60e3) } : {}),
+  })));
+}));
+
+// ADM gera uma senha provisória (a senha antiga não dá para ver: o sistema só guarda ela criptografada)
+const LETRAS_SENHA = 'abcdefghjkmnpqrstuvwxyz23456789';
+app.post('/api/usuarios/:id/senha-provisoria', auth, soAdmin, wrap(async (req, res) => {
+  const id = Number(req.params.id);
+  const { rows } = await pool.query('SELECT id, nome FROM usuarios WHERE id = $1', [id]);
+  if (!rows[0]) return erro(res, 404, 'Usuário não encontrado.');
+  if (id === req.user.id) return erro(res, 400, 'Para a sua própria senha, use “Minha conta”.');
+  const bytes = crypto.randomBytes(8);
+  const senha = Array.from(bytes, (b) => LETRAS_SENHA[b % LETRAS_SENHA.length]).join('');
+  await pool.query('UPDATE usuarios SET senha_hash = $1, trocar_senha = TRUE WHERE id = $2', [await bcrypt.hash(senha, 10), id]);
+  await registrar(req, 'equipe', 'senha', id, `gerou uma senha provisória para ${rows[0].nome}`);
+  res.json({ senha });
 }));
 
 app.post('/api/usuarios', auth, precisa('equipe', 'Você não tem permissão para criar logins.'), wrap(async (req, res) => {
@@ -206,7 +250,7 @@ app.post('/api/usuarios', auth, precisa('equipe', 'Você não tem permissão par
 
   try {
     const { rows } = await pool.query(
-      `INSERT INTO usuarios (nome, login, senha_hash, papel, permissoes, verificado) VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+      `INSERT INTO usuarios (nome, login, senha_hash, papel, permissoes, verificado, trocar_senha) VALUES ($1, $2, $3, $4, $5::jsonb, $6, TRUE)
        RETURNING ${CAMPOS_U}`,
       [nome, login, await bcrypt.hash(senha, 10), papel, JSON.stringify(permissoes), verificado]
     );
@@ -249,9 +293,10 @@ app.put('/api/usuarios/:id', auth, precisa('equipe', 'Você não tem permissão 
   try {
     const r = await pool.query(
       `UPDATE usuarios SET nome = $1, login = $2, papel = $3, ativo = $4, senha_hash = $5,
-              verificado = $6, permissoes = $7::jsonb WHERE id = $8
+              verificado = $6, permissoes = $7::jsonb,
+              trocar_senha = CASE WHEN $9 THEN TRUE ELSE trocar_senha END WHERE id = $8
        RETURNING ${CAMPOS_U}`,
-      [nome, login, papel, ativo, hash, verificado, JSON.stringify(permissoes), id]
+      [nome, login, papel, ativo, hash, verificado, JSON.stringify(permissoes), id, Boolean(senha) && id !== req.user.id]
     );
     const mud = [];
     if (nome !== u.nome) mud.push(`nome “${u.nome}” → “${nome}”`);
@@ -440,6 +485,39 @@ async function buscarProsp(id) {
   return rows[0];
 }
 
+// ---------- empresa repetida: mesmo nome OU mesmo telefone ----------
+// nome: sem diferença de maiúscula, acento e espaços extras. telefone: só os números, sem o 55 do Brasil.
+const SQL_NOME = `regexp_replace(translate(lower(trim(%s)), 'áàâãäéèêëíìîïóòôõöúùûüçñ', 'aaaaaeeeeiiiiooooouuuucn'), '\\s+', ' ', 'g')`;
+const SQL_FONE = `regexp_replace(regexp_replace(coalesce(%s, ''), '\\D', '', 'g'), '^(55(?=\\d{10,11}$)|0+)', '')`;
+async function acharRepetidas(empresa, telefone, ignorarId = null) {
+  const nome = (empresa || '').trim();
+  const fone = String(telefone || '').replace(/\D/g, '');
+  if (!nome && fone.length < 8) return [];
+  const { rows } = await pool.query(`
+    SELECT p.id, p.empresa, p.telefone, p.status, p.criado_em, u.nome AS usuario_nome,
+           (${SQL_NOME.replace('%s', 'p.empresa')} = ${SQL_NOME.replace('%s', '$1')}) AS mesmo_nome,
+           (length(${SQL_FONE.replace('%s', '$2')}) >= 8 AND ${SQL_FONE.replace('%s', 'p.telefone')} = ${SQL_FONE.replace('%s', '$2')}) AS mesmo_fone
+      FROM prospeccoes p
+      LEFT JOIN usuarios u ON u.id = p.usuario_id
+     WHERE ($3::int IS NULL OR p.id <> $3)
+       AND ((${SQL_NOME.replace('%s', 'p.empresa')} = ${SQL_NOME.replace('%s', '$1')} AND $1 <> '')
+         OR (length(${SQL_FONE.replace('%s', '$2')}) >= 8 AND ${SQL_FONE.replace('%s', 'p.telefone')} = ${SQL_FONE.replace('%s', '$2')}))
+     ORDER BY p.criado_em DESC
+     LIMIT 5`, [nome, fone, ignorarId]);
+  return rows;
+}
+const RESUMO_REP = (r) => ({
+  id: r.id, empresa: r.empresa, telefone: r.telefone, status: r.status,
+  criado_em: r.criado_em, usuario_nome: r.usuario_nome, mesmo_nome: r.mesmo_nome, mesmo_fone: r.mesmo_fone,
+});
+
+// aviso enquanto a pessoa digita
+app.get('/api/prospeccoes/repetidas', auth, wrap(async (req, res) => {
+  const ignorar = Number(req.query.ignorar) || null;
+  const rows = await acharRepetidas(txt(req.query.empresa, 200), txt(req.query.telefone, 40), ignorar);
+  res.json(rows.map(RESUMO_REP));
+}));
+
 app.post('/api/prospeccoes', auth, wrap(async (req, res) => {
   const b = req.body;
   const d = {};
@@ -449,6 +527,13 @@ app.post('/api/prospeccoes', auth, wrap(async (req, res) => {
 
   const retorno = lerRetorno(b.retorno_em);
   if (retorno === undefined) return erro(res, 400, 'Data de retorno inválida.');
+  // já existe? avisa e só salva se a pessoa confirmar
+  if (!b.confirmar_repetida) {
+    const rep = await acharRepetidas(d.empresa, d.telefone);
+    if (rep.length) {
+      return res.status(409).json({ erro: 'Essa empresa já foi cadastrada.', repetidas: rep.map(RESUMO_REP) });
+    }
+  }
   const nid = await nichoId(b.nicho, req.user.id);
   const { rows } = await pool.query(
     `INSERT INTO prospeccoes (empresa, nicho_id, status, telefone, localidade, instagram, site, outras_redes, anotacoes, usuario_id, retorno_em)

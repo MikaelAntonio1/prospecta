@@ -75,6 +75,9 @@ async function init() {
     ALTER TABLE usuarios ADD CONSTRAINT usuarios_papel_check CHECK (papel IN ('admin', 'gerente', 'funcionario'));
     ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS verificado BOOLEAN NOT NULL DEFAULT FALSE;
     ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS permissoes JSONB NOT NULL DEFAULT '{}';
+    -- online/offline (última vez que a pessoa usou o sistema) e senha provisória que precisa ser trocada
+    ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS visto_em TIMESTAMPTZ;
+    ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS trocar_senha BOOLEAN NOT NULL DEFAULT FALSE;
     -- comissão manual em porcentagem do valor do projeto (ex.: 15 = 15%)
     ALTER TABLE contratos ADD COLUMN IF NOT EXISTS comissao_pct NUMERIC(6,2) CHECK (comissao_pct >= 0 AND comissao_pct <= 100);
 
