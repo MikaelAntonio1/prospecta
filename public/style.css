@@ -971,7 +971,8 @@ form.so-leitura button.primario { display: none; }
 /* ===== Aviso de empresa já cadastrada ===== */
 .aviso-rep { border: 1px solid color-mix(in srgb, var(--pensando) 45%, transparent); background: color-mix(in srgb, var(--pensando) 10%, var(--superficie));
   border-radius: 10px; padding: 10px 12px; font-size: 13.5px; color: var(--texto); }
-.aviso-rep strong { display: block; margin-bottom: 4px; }
+.aviso-rep strong { display: flex; align-items: center; gap: 7px; margin-bottom: 4px; }
+.ico-perigo { width: 18px; height: 18px; flex: none; fill: none; stroke: var(--pensando); stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
 .aviso-rep ul { margin: 0 0 6px; padding-left: 18px; display: grid; gap: 4px; }
 .aviso-rep li span { display: block; color: var(--texto-2, var(--texto-3)); font-size: 12.5px; }
 .aviso-rep small { color: var(--texto-3); }

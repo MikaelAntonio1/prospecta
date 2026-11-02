@@ -772,7 +772,7 @@ function mostrarRepetidas(lista) {
   if (!lista.length) { box.innerHTML = ''; return; }
   const porque = (r) => [r.mesmo_nome && 'mesmo nome', r.mesmo_fone && 'mesmo número'].filter(Boolean).join(' e ');
   box.innerHTML = `
-    <strong>⚠️ ${lista.length === 1 ? 'Essa empresa já foi cadastrada' : `Já existem ${lista.length} cadastros parecidos`}</strong>
+    <strong><svg class="ico-perigo" viewBox="0 0 24 24" aria-hidden="true"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>${lista.length === 1 ? 'Essa empresa já foi cadastrada' : `Já existem ${lista.length} cadastros parecidos`}</strong>
     <ul>${lista.map((r) => `<li><b>${esc(r.empresa)}</b>${r.telefone ? ` · ${esc(r.telefone)}` : ''}
       <span>${porque(r)} — por ${esc(primeiroNome(r.usuario_nome || 'alguém'))} em ${new Date(r.criado_em).toLocaleDateString('pt-BR')} · ${STATUS[r.status] || r.status}</span></li>`).join('')}</ul>
     ${novo ? '<small>Se for outra unidade ou você quiser registrar de novo, clique em <b>Cadastrar mesmo assim</b>.</small>' : '<small>Confira se não é a mesma empresa antes de salvar.</small>'}`;
